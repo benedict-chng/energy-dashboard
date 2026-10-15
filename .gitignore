@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local secrets (Pages Function env for wrangler dev) — NEVER commit
+.dev.vars
+.dev.vars.*
+
+# Wrangler local state
+.wrangler/
+
+# Misc
+*.log
+.DS_Store
