@@ -144,6 +144,10 @@ Both hostnames sit behind **two** Cloudflare Access self-hosted apps
 Each has one Allow policy: email `benedict_chng@yahoo.com`. Session length:
 **720 h (30 days)** after each login.
 
+The tenant's only login method is **One-time PIN** (email OTP, IdP id
+`df9db038-06fd-4b4c-a687-58c939866a1d`), and both apps are pinned to it
+(`allowed_idps`) — no other sign-in method can ever appear.
+
 **Logging in:** open either hostname → you get redirected to
 `raspy-dew-2e27.cloudflareaccess.com` → enter your Yahoo email → One-Time PIN
 arrives by email → in. No password, and nobody else can reach the app.
