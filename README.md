@@ -27,7 +27,7 @@ The key is never present in frontend code, the JS bundle, or the browser.
                                 ▼
 ┌───────────────────────── Cloudflare Pages ─────────────────────────┐
 │                                                                    │
-│   energy-dashboard.ahbeng.xyz          home-energy-dashboard.pages.dev    │
+│   energy-dashboard.ahbeng.xyz          ben-energy-dashboard.pages.dev     │
 │        │                                 │                         │
 │        └────────────┬────────────────────┘                         │
 │                     ▼                                              │
@@ -49,9 +49,11 @@ Request flow:
 
 1. `GET /api/<path>?<query>` hits the Pages Function (anything under `/api/`).
 2. Non-GET → `405`. Missing `QUERY_API_KEY` → `500` (nothing leaves Cloudflare).
-3. The Function rewrites the URL to `https://energy.ahbeng.xyz/<path>?<query>`
-   (the `/api` prefix is stripped), adds `X-API-Key`, and streams the upstream
-   response back **with its original status code and JSON error body**.
+3. The Function rewrites the URL to `https://energy.ahbeng.xyz/api/<path>?<query>`
+   (the FastAPI server mounts all routes under `/api/v1/...`, so the
+   dashboard-facing `/api` prefix is re-added), adds `X-API-Key`, and streams
+   the upstream response back **with its original status code and JSON error
+   body**.
 4. `502` if the upstream is unreachable (e.g. tunnel down).
 
 ---
@@ -90,82 +92,76 @@ Other scripts:
 
 ---
 
-## Deploy to Cloudflare Pages (dashboard)
+## Deployment (wrangler CLI — deployed 2026-10-17)
 
-Suggested project name: **`home-energy-dashboard`**
-(→ `https://home-energy-dashboard.pages.dev`)
+> The old dashboard click-path (Workers & Pages → Connect to Git) died in the
+> 2026 Cloudflare dashboard revamp; deploys are CLI-only now.
 
-1. **Get the code into Git.** Push this directory to a GitHub/GitLab repo
-   (production branch `main`). Direct-upload via the dashboard does not compile
-   Functions; alternatively use `npx wrangler pages deploy dist` after
-   `npm run build`, but Git-connect is the recommended path below.
-2. **Create the project.** Cloudflare dashboard → **Workers & Pages** →
-   **Create application** → **Pages** tab → **Connect to Git** → authorise and
-   pick the repo → **Begin setup**:
-   - Project name: `home-energy-dashboard`
-   - Production branch: `main`
-   - Framework preset: **Vite** (fills in build command `npm run build`,
-     build output directory `dist`)
-   → **Save and Deploy** (first deploy may fail-ish warn on missing env var;
-     finish steps 3–4, then redeploy).
-3. **Set the API key.** Project → **Settings** → **Variables and Secrets** →
-   **Add variable**:
-   - Name: `QUERY_API_KEY`
-   - Value: the `QUERY_API_KEY` value from the home-energy-server's `.env`
-   - Type: **Secret** (encrypted) — scope it to **Production**
-   Then **Deployments** → latest deployment → **Retry deployment** so the new
-   variable is picked up.
-4. **Custom domain.** Project → **Custom domains** → **Set up a custom domain**
-   → enter `energy-dashboard.ahbeng.xyz` → **Continue** → **Activate domain**.
-   (Requires the `ahbeng.xyz` zone in the same Cloudflare account; Cloudflare
-   creates the CNAME to the pages.dev project automatically.)
-5. **Disable preview deployments.** Project → **Settings** → **Builds &
-   deployments** → **Preview deployments** → **Disable**. Only production
-   builds (pushes to `main`) deploy.
+Live: **https://energy-dashboard.ahbeng.xyz** (custom domain) and
+**https://ben-energy-dashboard.pages.dev**. The project is named
+`ben-energy-dashboard` — `home-energy-dashboard.pages.dev` is squatted by an
+unrelated account, so the original name was unavailable.
+
+Both hostnames are **Cloudflare Access-gated** (see next section).
+
+To redeploy (token needs Pages · Edit):
+
+```bash
+export CLOUDFLARE_API_TOKEN=<token>
+export CLOUDFLARE_ACCOUNT_ID=3ff9c0b4999a44d641159ab46b34bde1
+npm run build
+npx wrangler pages deploy dist --project-name=ben-energy-dashboard --branch=main
+```
+
+Production-only: deploys are always `--branch=main`, so there are no preview
+deployments to disable.
+
+**Secret** `QUERY_API_KEY` is already set (value pulled from the server's
+`.env`). To rotate it:
+
+```bash
+printf '%s' '<new-key>' | npx wrangler pages secret put QUERY_API_KEY \
+  --project-name=ben-energy-dashboard
+npx wrangler pages deploy dist --project-name=ben-energy-dashboard --branch=main
+```
+
+**Custom domain** `energy-dashboard.ahbeng.xyz` is attached to the Pages
+project via the Pages API, backed by a proxied CNAME
+`energy-dashboard → ben-energy-dashboard.pages.dev` in the `ahbeng.xyz` zone
+(DNS · Edit needed to touch that record).
 
 ---
 
-## Cloudflare Access (both hostnames — do not skip one)
+## Cloudflare Access (both hostnames — configured 2026-10-17)
 
-The dashboard is protected by **two** Access gates, because it is reachable on
-two hostnames:
+Both hostnames sit behind **two** Cloudflare Access self-hosted apps
+(account `Benedict_chng@yahoo.com's Account`), created via the Access API
+(token needs Access: Apps and Policies · Edit):
 
-1. `energy-dashboard.ahbeng.xyz` (custom domain)
-2. `home-energy-dashboard.pages.dev` (the Pages project's own hostname — anyone
-   who guesses it otherwise bypasses the custom-domain gate)
+1. `Energy Dashboard (custom domain)` → `energy-dashboard.ahbeng.xyz`
+2. `Energy Dashboard (pages.dev)` → `ben-energy-dashboard.pages.dev`
 
-**Option A — second Zero Trust app (always available):**
+Each has one Allow policy: email `benedict_chng@yahoo.com`. Session length:
+**720 h (30 days)** after each login.
 
-For each hostname above, repeat:
+**Logging in:** open either hostname → you get redirected to
+`raspy-dew-2e27.cloudflareaccess.com` → enter your Yahoo email → One-Time PIN
+arrives by email → in. No password, and nobody else can reach the app.
 
-1. Zero Trust dashboard → **Access** → **Applications** → **Add an application**
-   → **Self-hosted**.
-2. Application name: e.g. `Home Energy Dashboard (custom domain)` and
-   `Home Energy Dashboard (pages.dev)`.
-3. Application domain: enter the hostname (`energy-dashboard.ahbeng.xyz`, then
-   `home-energy-dashboard.pages.dev`), path left empty.
-4. Add a policy: name `allow-ben`, Action **Allow**, Include → Selector
-   **Emails** → `benedict_chng@yahoo.com`.
-5. Save. First visit triggers an email-OTP login.
+Verified 2026-10-17: unauthenticated requests to both hostnames (SPA *and*
+`/api/*`) return `302` to the Access login — nothing is exposed.
 
-**Option B — the Pages project's Access policy setting:** some accounts show a
-Cloudflare Access section on the Pages project itself (Pages project →
-**Settings** → Access policy / "Limit access to your Pages project"). You can
-enable it there for the `*.pages.dev` hostname with the same Allow email policy
-`benedict_chng@yahoo.com` and keep only the custom domain as a separate
-Zero Trust app (Option A step for `energy-dashboard.ahbeng.xyz` only).
-
-Either way, the end state is: **both** hostnames require Access, and only
-`benedict_chng@yahoo.com` is allowed.
+To change the policy later, manage these two apps in the Zero Trust dashboard
+(Access → Applications) or via the Access API.
 
 ---
 
 ## Troubleshooting
 
 - **`401 {"detail":"invalid or missing API key"}`** — the `QUERY_API_KEY`
-  env var is missing on the Pages project or doesn't match the server's key.
-  Fix: compare with the server's `.env`, re-add the variable (Settings →
-  Variables and Secrets), then redeploy. Locally, check `.dev.vars`.
+  secret is missing on the Pages project or doesn't match the server's key.
+  Fix: re-run `wrangler pages secret put QUERY_API_KEY` with the server's
+  value, then redeploy. Locally, check `.dev.vars`.
 - **CORS errors should never appear.** The browser only talks to its own
   origin; the Function does the upstream call server-side. If you ever see a
   CORS error, the frontend is calling `https://energy.ahbeng.xyz` directly —

@@ -27,24 +27,24 @@ function testPathMapping(): void {
   check(
     "overview path + query forwarded",
     buildUpstreamUrl(["v1", "energy", "overview"], "?bucket=1h&from=2026-10-15T00:00:00Z") ===
-      `${UPSTREAM_ORIGIN}/v1/energy/overview?bucket=1h&from=2026-10-15T00:00:00Z`,
+      `${UPSTREAM_ORIGIN}/api/v1/energy/overview?bucket=1h&from=2026-10-15T00:00:00Z`,
   );
   check(
     "nested solar path",
     buildUpstreamUrl(["v1", "solar", "readings", "latest"], "") ===
-      `${UPSTREAM_ORIGIN}/v1/solar/readings/latest`,
+      `${UPSTREAM_ORIGIN}/api/v1/solar/readings/latest`,
   );
   check(
     "root call (no segments) -> origin root",
-    buildUpstreamUrl(undefined, "") === `${UPSTREAM_ORIGIN}/`,
+    buildUpstreamUrl(undefined, "") === `${UPSTREAM_ORIGIN}/api/`,
   );
   check(
     "segments are re-encoded safely",
-    buildUpstreamUrl(["v1", "a b"], "") === `${UPSTREAM_ORIGIN}/v1/a%20b`,
+    buildUpstreamUrl(["v1", "a b"], "") === `${UPSTREAM_ORIGIN}/api/v1/a%20b`,
   );
   check(
     "single string segment form",
-    buildUpstreamUrl("v1", "?x=1") === `${UPSTREAM_ORIGIN}/v1?x=1`,
+    buildUpstreamUrl("v1", "?x=1") === `${UPSTREAM_ORIGIN}/api/v1?x=1`,
   );
 }
 

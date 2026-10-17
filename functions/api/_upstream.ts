@@ -13,8 +13,10 @@ export const UPSTREAM_ORIGIN = "https://energy.ahbeng.xyz";
  * Map this Function's catch-all path segments + query string to the
  * equivalent upstream URL. `functions/api/[[path]].ts` routes
  * `/api/<anything>` here, so `/api/v1/energy/overview?bucket=1h` maps to
- * `https://energy.ahbeng.xyz/v1/energy/overview?bucket=1h` (the `/api`
- * prefix is stripped, the query string is forwarded untouched).
+ * `https://energy.ahbeng.xyz/api/v1/energy/overview?bucket=1h` — the
+ * dashboard-facing `/api` prefix is re-added because the FastAPI server
+ * mounts all routes under `/api/v1/...`; the query string is forwarded
+ * untouched.
  */
 export function buildUpstreamUrl(
   segments: string | readonly string[] | undefined,
@@ -23,7 +25,7 @@ export function buildUpstreamUrl(
   const path = (Array.isArray(segments) ? segments : segments ? [segments] : [])
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-  return `${UPSTREAM_ORIGIN}/${path}${search}`;
+  return `${UPSTREAM_ORIGIN}/api/${path}${search}`;
 }
 
 /** Small JSON response helper matching FastAPI's `{"detail": ...}` style. */
