@@ -101,7 +101,7 @@ The header tabs switch between **Charts** (the original view, untouched) and **L
 - **Dial** — the circumference is TIME: 6am at 12 o'clock, clockwise a full day back
   to 6am, filled with TODAY so far (midnight → now). The arc between "now" and
   midnight stays blank until tonight actually happens; the needle marks "now".
-  Each 15-minute bar radiates from 0.35r to 0.9r with squared (butt) ends, light
+  Each 15-minute bar radiates from 0.4r to 0.85r with squared (butt) ends, light
   grey at full opacity, its length linear-proportional to the grid watts used in
   that slot (normalised to the day's peak; dashed circle = half-peak, labelled with
   its actual W). **Hover a bar** for its time range, watts, kWh and ToU cost. Ring

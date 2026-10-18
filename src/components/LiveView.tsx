@@ -6,7 +6,7 @@
  * back to 6am, populated with TODAY's 15-minute buckets (midnight -> now; the
  * arc between "now" and midnight stays blank until tonight actually happens;
  * the needle marks "now").
- * Each 15-minute bar radiates from 0.35r to 0.9r with squared ends, its
+ * Each 15-minute bar radiates from 0.4r to 0.85r with squared ends, its
  * length being the grid power used in that slot; hovering a bar shows its
  * time range, watts, kWh and ToU cost. The centre shows the current watts
  * only. Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
@@ -79,9 +79,9 @@ export function recentSixAm(now: Date): Date {
 const SIZE = 340;
 const C = SIZE / 2;
 const RING_R = 150;
-/** Bars radiate from 0.35r out to 0.9r with squared ends (no rounding). */
-const BAR_R0 = 0.35 * RING_R;
-const BAR_SPAN = 0.9 * RING_R - BAR_R0;
+/** Bars radiate from 0.4r out to 0.85r with squared ends (no rounding). */
+const BAR_R0 = 0.4 * RING_R;
+const BAR_SPAN = 0.85 * RING_R - BAR_R0;
 
 /** Linear scale to the day's peak: the longest bar reaches the full ring radius. */
 function barRadius(w: number, dayMax: number): number {
