@@ -218,7 +218,7 @@ function UsageDial(props: {
         {formatWattsShort(dayMax / 2)}
       </text>
 
-      {/* solar generation: thin gold line weaving between bar tips and the ring */}
+      {/* solar generation: gold line — distance from centre ∝ solar watts */}
       {(() => {
         const solarMax = Math.max(1000, ...petals.map((p) => p.avg_solar_watts ?? 0));
         const pts = petals
@@ -226,7 +226,7 @@ function UsageDial(props: {
           .map((p) => {
             const ms = new Date(p.bucket).getTime();
             const s = Math.max(0, Math.min(p.avg_solar_watts ?? 0, solarMax));
-            const [x, y] = polar(130 + (s / solarMax) * 13, dayAngle(ms, sixAmMs));
+            const [x, y] = polar(8 + (s / solarMax) * 132, dayAngle(ms, sixAmMs));
             return `${x.toFixed(2)} ${y.toFixed(2)}`;
           });
         return pts.length >= 2 ? (

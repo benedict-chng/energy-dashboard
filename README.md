@@ -105,16 +105,18 @@ Other scripts:
   grey at full opacity, its length linear-proportional to the grid watts used in
   that slot (normalised to the day's peak; dashed circle = half-peak, labelled with
   its actual W). **Hover a bar** for its time range, watts, kWh, ToU cost and solar.
-  A thin **gold line** traces solar generation around the ring (0.87r–0.95r, scaled
-  to the day's solar peak). Ring arcs follow the tariff: amber = peak
+  A thin **gold line** traces solar generation radiating from the centre — its
+  distance from the middle is proportional to the solar watts, peaking near the
+  ring at the day's solar max. Ring arcs follow the tariff: amber = peak
   (6am–midnight), blue = off-peak (midnight–6am). The centre shows the current
   watts only (colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red) on a
   small backdrop fade.
 - **Freshness** — the Pi ingests once per minute; latest readings poll every 10 s,
   history + cost strips every 60 s. The "grid reading" chip shows data age and turns
   red after 10 min of ingest silence.
-- **Solar** — shown separately (gold chip): the meter reads net grid import, so with
-  solar covering the house the dial sits at 0 W — that energy is just free.
+- **Solar** — gold chip below the dial + the gold line on the dial itself: the meter
+  reads net grid import, so with solar covering the house the grid bars sit at 0 W —
+  that energy is just free.
 - **Costs** — time-of-use tariff from `src/lib/tariff.ts`:
   **8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 Melbourne time** (evaluated via ICU, so
   it stays correct regardless of device timezone). Dollars are estimates: grid import
