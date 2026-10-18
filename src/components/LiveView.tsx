@@ -26,8 +26,6 @@ import { formatDollars, formatKwh, formatWattsShort } from "../lib/format";
 const FAST_MS = 10_000;
 const SLOW_MS = 60_000;
 const DAY_MS = 24 * 3600_000;
-/** Dial scale ceiling (W); sqrt-compressed like the Powerpal ring. */
-const MAX_W = 8000;
 /** Ingest silence longer than this turns the reading-age chip red. */
 const STALE_MS = 10 * 60_000;
 
@@ -82,7 +80,10 @@ const RING_R = 150;
 const BAR_R0 = 2;
 const BAR_SPAN = RING_R - BAR_R0 - 8;
 
-const frac = (w: number) => Math.sqrt(Math.max(0, Math.min(w, MAX_W)) / MAX_W);
+/** Linear scale to the day's peak: the longest bar reaches the full ring radius. */
+function barRadius(w: number, dayMax: number): number {
+  return BAR_R0 + (Math.max(0, Math.min(w, dayMax)) / dayMax) * BAR_SPAN;
+}
 
 /** Bar colour by intensity — pops off the dark ring and encodes load level. */
 function barColor(w: number): string {
@@ -140,8 +141,9 @@ function UsageDial(props: {
   petals: EnergyOverviewPoint[];
   sixAmMs: number;
   nowMs: number;
+  dayMax: number;
 }) {
-  const { watts, centsPerHour, petals, sixAmMs, nowMs } = props;
+  const { watts, centsPerHour, petals, sixAmMs, nowMs, dayMax } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
   const [hover, setHover] = useState<HoverSlot | null>(null);
@@ -183,8 +185,8 @@ function UsageDial(props: {
       <defs>
         {/* soft fade behind the centre readout so bars still radiate from the middle */}
         <radialGradient id="centreFade">
-          <stop offset="0%" stopColor="rgba(13,18,26,0.93)" />
-          <stop offset="40%" stopColor="rgba(13,18,26,0.85)" />
+          <stop offset="0%" stopColor="rgba(13,18,26,0.92)" />
+          <stop offset="60%" stopColor="rgba(13,18,26,0.55)" />
           <stop offset="100%" stopColor="rgba(13,18,26,0)" />
         </radialGradient>
       </defs>
@@ -204,16 +206,22 @@ function UsageDial(props: {
           </text>
         );
       })}
-      {/* faint 2 kW reference circle */}
+      {/* half-peak reference circle, labelled with its actual watt value */}
       <circle
         cx={C}
         cy={C}
-        r={BAR_R0 + frac(2000) * BAR_SPAN}
+        r={BAR_R0 + BAR_SPAN / 2}
         fill="none"
-        stroke="rgba(255,255,255,0.09)"
+        stroke="rgba(255,255,255,0.10)"
         strokeWidth={1}
         strokeDasharray="3 5"
       />
+      <text x={C} y={C - (BAR_R0 + BAR_SPAN / 2) + 12} textAnchor="middle" fontSize={9} fill="#93a1b0">
+        {formatWattsShort(dayMax / 2)}
+      </text>
+
+      {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
+      <circle cx={C} cy={C} r={92} fill="url(#centreFade)" pointerEvents="none" />
 
       {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot.
           Coloured by intensity so they pop off the dark ring; each bar owns a wide
@@ -225,7 +233,7 @@ function UsageDial(props: {
         const angle = dayAngle(ms, sixAmMs);
         const w = p.avg_grid_watts;
         const zero = w === 0;
-        const len = BAR_R0 + frac(w) * BAR_SPAN;
+        const len = barRadius(w, dayMax);
         const [x0, y0] = polar(BAR_R0, angle);
         const [x1, y1] = polar(zero ? BAR_R0 + 5 : Math.max(len, BAR_R0 + 6), angle);
         const [hx0, hy0] = polar(0, angle);
@@ -253,9 +261,6 @@ function UsageDial(props: {
         );
       })}
 
-      {/* soft fade behind the readout (bars still radiate from the centre) */}
-      <circle cx={C} cy={C} r={100} fill="url(#centreFade)" pointerEvents="none" />
-
       {/* now-marker on the time ring */}
       {(() => {
         const a = dayAngle(nowMs, sixAmMs);
@@ -274,10 +279,10 @@ function UsageDial(props: {
         <text x={C} y={C - 40} textAnchor="middle" fontSize={12} fill="#93a1b0" letterSpacing={1}>
           now using
         </text>
-        <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour}>
+        <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour} stroke="rgba(13,18,26,0.9)" strokeWidth={5} paintOrder="stroke">
           {watts === null ? "—" : formatWattsShort(watts)}
         </text>
-        <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2">
+        <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2" stroke="rgba(13,18,26,0.9)" strokeWidth={4} paintOrder="stroke">
           {centsPerHour === null ? "—" : formatDollars(centsPerHour)}
         </text>
         <text x={C} y={C + 54} textAnchor="middle" fontSize={11} fill="#93a1b0">
@@ -382,6 +387,11 @@ export function LiveView() {
     [monthPts],
   );
   const maxMonthCents = Math.max(1, ...months.map((m) => m.cents));
+  /** Day's peak draw — the dial scale pins to this so the longest bar reaches the ring. */
+  const dayMax = useMemo(
+    () => Math.max(1000, ...petals.map((p) => p.avg_grid_watts ?? 0)),
+    [petals],
+  );
 
   return (
     <div className="live-wrap">
@@ -404,6 +414,7 @@ export function LiveView() {
             petals={petals}
             sixAmMs={sixAmMs}
             nowMs={Date.now()}
+            dayMax={dayMax}
           />
         </div>
         <div className="dial-meta">
