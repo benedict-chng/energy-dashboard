@@ -101,8 +101,9 @@ The header tabs switch between **Charts** (the original view, untouched) and **L
 - **Dial** — the circumference is TIME: 6am at 12 o'clock, clockwise a full day back
   to 6am, filled with a ROLLING last-24-hours window (the overnight 12am–6am arc
   always shows the most recent occurrence of those hours; the needle marks "now").
-  Each 15-minute bar radiates from the CENTRE to the time ring, its length
-  being the grid watts used in that slot — **linear-scaled to the day's peak**, so the
+  Each 15-minute bar radiates from 0.5r (half the ring radius) outward to the
+  time ring, its length being the grid watts used in that slot — **linear-scaled
+  to the day's peak**, so the
   longest bar always reaches the full ring radius (dashed circle = half-peak, labelled
   with its actual W). Bars are **light grey** (Powerpal-style, full opacity).
   **Hover a bar** for its time range,

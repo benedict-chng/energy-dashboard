@@ -5,10 +5,10 @@
  * The dial's circumference is TIME — 6am at 12 o'clock, clockwise a full day
  * back to 6am, populated with the ROLLING last 24 hours of 15-minute buckets
  * (overnight slots show this morning's early hours; the needle marks "now").
- * Each 15-minute bar radiates from the CENTRE out to the time ring, its
- * length being the grid power used in that slot; hovering a bar shows its
- * time range, watts, kWh and ToU cost. Amber ring arc = peak tariff
- * (6am–midnight), blue arc = off-peak (midnight–6am).
+ * Each 15-minute bar radiates from 0.5r (half the ring radius) outward to
+ * the time ring, its length being the grid power used in that slot; hovering
+ * a bar shows its time range, watts, kWh and ToU cost. Amber ring arc = peak
+ * tariff (6am–midnight), blue arc = off-peak (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -77,8 +77,8 @@ export function recentSixAm(now: Date): Date {
 const SIZE = 340;
 const C = SIZE / 2;
 const RING_R = 150;
-/** Bars radiate from the centre out to the time ring. */
-const BAR_R0 = 0;
+/** Bars radiate from half the ring radius (0.5r) outward to the time ring. */
+const BAR_R0 = RING_R / 2;
 const BAR_SPAN = RING_R - BAR_R0 - 8;
 
 /** Linear scale to the day's peak: the longest bar reaches the full ring radius. */
@@ -215,10 +215,10 @@ function UsageDial(props: {
       {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
       <circle cx={C} cy={C} r={92} fill="url(#centreFade)" pointerEvents="none" />
 
-      {/* usage bars: circumference = time since 6am, length proportional to the watts
-          in that 15-min slot (linear, day-peak normalized). Light grey like the
-          Powerpal original; each bar owns a wide invisible hit-line so hovering is
-          easy; zero-draw slots collapse to a nub at the centre. */}
+      {/* usage bars: circumference = time since 6am; each bar starts at 0.5r and its
+          length is proportional to the watts in that 15-min slot (linear, day-peak
+          normalized). Light grey like the Powerpal original; wide invisible hit-lines
+          make hovering easy; zero-draw slots collapse to a nub at the bar base. */}
       {petals.map((p) => {
         if (p.avg_grid_watts === null || p.avg_grid_watts < 0) return null;
         const ms = new Date(p.bucket).getTime();
