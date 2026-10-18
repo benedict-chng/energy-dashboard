@@ -84,6 +84,15 @@ const BAR_SPAN = RING_R - BAR_R0 - 8;
 
 const frac = (w: number) => Math.sqrt(Math.max(0, Math.min(w, MAX_W)) / MAX_W);
 
+/** Bar colour by intensity — pops off the dark ring and encodes load level. */
+function barColor(w: number): string {
+  if (w < 100) return "#4f8cff";
+  if (w < 400) return "#7fbb63";
+  if (w < 1200) return "#e8c33d";
+  if (w < 3000) return "#e8792f";
+  return "#d9534a";
+}
+
 function polar(r: number, angleDeg: number): [number, number] {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
   return [C + r * Math.cos(rad), C + r * Math.sin(rad)];
@@ -174,8 +183,8 @@ function UsageDial(props: {
       <defs>
         {/* soft fade behind the centre readout so bars still radiate from the middle */}
         <radialGradient id="centreFade">
-          <stop offset="0%" stopColor="rgba(13,18,26,0.96)" />
-          <stop offset="55%" stopColor="rgba(13,18,26,0.86)" />
+          <stop offset="0%" stopColor="rgba(13,18,26,0.93)" />
+          <stop offset="40%" stopColor="rgba(13,18,26,0.85)" />
           <stop offset="100%" stopColor="rgba(13,18,26,0)" />
         </radialGradient>
       </defs>
@@ -207,14 +216,18 @@ function UsageDial(props: {
       />
 
       {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot.
-          Each bar owns a wide invisible hit-line so hovering is easy. */}
+          Coloured by intensity so they pop off the dark ring; each bar owns a wide
+          invisible hit-line so hovering is easy. Zero-draw slots show as short grey
+          nubs so the day's arc is always visible. */}
       {petals.map((p) => {
         if (p.avg_grid_watts === null || p.avg_grid_watts < 0) return null;
         const ms = new Date(p.bucket).getTime();
         const angle = dayAngle(ms, sixAmMs);
-        const len = BAR_R0 + frac(p.avg_grid_watts) * BAR_SPAN;
+        const w = p.avg_grid_watts;
+        const zero = w === 0;
+        const len = BAR_R0 + frac(w) * BAR_SPAN;
         const [x0, y0] = polar(BAR_R0, angle);
-        const [x1, y1] = polar(len, angle);
+        const [x1, y1] = polar(zero ? BAR_R0 + 5 : Math.max(len, BAR_R0 + 6), angle);
         const [hx0, hy0] = polar(0, angle);
         const [hx1, hy1] = polar(RING_R - 4, angle);
         const hovered = hover?.bucket === p.bucket;
@@ -222,7 +235,7 @@ function UsageDial(props: {
           <g
             key={p.bucket}
             onMouseEnter={() =>
-              setHover({ bucket: p.bucket, watts: p.avg_grid_watts ?? 0, kwh: p.consumed_kwh })
+              setHover({ bucket: p.bucket, watts: w, kwh: p.consumed_kwh })
             }
             onMouseLeave={() => setHover((cur) => (cur?.bucket === p.bucket ? null : cur))}
           >
@@ -231,8 +244,8 @@ function UsageDial(props: {
               y1={y0}
               x2={x1}
               y2={y1}
-              stroke={hovered ? "#e8edf2" : "rgba(255,255,255,0.45)"}
-              strokeWidth={hovered ? 6 : 5}
+              stroke={hovered ? "#ffffff" : zero ? "rgba(255,255,255,0.22)" : barColor(w)}
+              strokeWidth={hovered ? 7 : zero ? 3 : 6}
               strokeLinecap="round"
             />
             <line x1={hx0} y1={hy0} x2={hx1} y2={hy1} stroke="rgba(0,0,0,0)" strokeWidth={12} pointerEvents="stroke" />
@@ -241,7 +254,7 @@ function UsageDial(props: {
       })}
 
       {/* soft fade behind the readout (bars still radiate from the centre) */}
-      <circle cx={C} cy={C} r={116} fill="url(#centreFade)" pointerEvents="none" />
+      <circle cx={C} cy={C} r={100} fill="url(#centreFade)" pointerEvents="none" />
 
       {/* now-marker on the time ring */}
       {(() => {
@@ -441,7 +454,9 @@ export function LiveView() {
       </div>
 
       <div className="tariff-note">
-        ToU tariff estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 (Melbourne time) ·
+        Bar colours: blue trickle · green low · yellow medium · orange high · red spike ·
+        grey nub = zero draw. ToU tariff estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh
+        06:00–24:00 (Melbourne time) ·
         covers grid import only — solar self-consumption is free · supply charge &amp; network
         fees not included · the first recorded month is partial.
       </div>
