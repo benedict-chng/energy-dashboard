@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.functions.json --noEmit && vite build",
     "preview": "vite preview",
     "pages:dev": "vite build && wrangler pages dev dist --port=8788",
-    "test": "node scripts/verify-upstream.ts"
+    "test": "node scripts/verify-upstream.ts && node scripts/verify-costs.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

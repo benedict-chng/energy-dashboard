@@ -70,3 +70,22 @@ export function formatBucketTooltip(ms: number): string {
     hour12: false,
   });
 }
+
+/** Dial-style watts: "374 W" below 1 kW, "2.7 kW" above. */
+export function formatWattsShort(watts: number | null | undefined): string {
+  if (watts === null || watts === undefined || Number.isNaN(watts)) return "—";
+  if (Math.abs(watts) >= 1000) return `${fixed1.format(watts / 1000)} kW`;
+  return `${integerFormatter.format(Math.round(watts))} W`;
+}
+
+/** Cents → "$1.25" (negative cents render as "-$0.42"). */
+export function formatDollars(cents: number | null | undefined): string {
+  if (cents === null || cents === undefined || Number.isNaN(cents)) return "—";
+  const sign = cents < 0 ? "-" : "";
+  return `${sign}$${fixed2.format(Math.abs(cents) / 100)}`;
+}
+
+const fixed1 = new Intl.NumberFormat("en-AU", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});

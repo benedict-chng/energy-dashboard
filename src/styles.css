@@ -313,6 +313,125 @@ button.ghost.on {
   color: var(--muted);
 }
 
+/* --------------------------- live view (dial) --------------------------- */
+
+.dial-card .dial-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 2px;
+}
+
+.dial-svg {
+  width: min(420px, 100%);
+  height: auto;
+}
+
+.dial-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dial-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  justify-content: center;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.dial-solar {
+  color: #e5c04b;
+}
+
+.dial-age.stale {
+  color: #d9534a;
+  font-weight: 600;
+}
+
+.live-strips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.strip-row {
+  display: flex;
+  gap: 28px;
+  padding: 6px 2px 2px;
+}
+
+.strip-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.strip-big {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.strip-sub {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.month-bars {
+  display: flex;
+  align-items: stretch;
+  gap: 18px;
+  height: 110px;
+  padding: 4px 2px 0;
+}
+
+.month-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  max-width: 120px;
+}
+
+.month-val {
+  font-size: 12.5px;
+}
+
+.month-bar {
+  width: 46px;
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+
+.month-bar-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #4f8cff, #2f6ae0);
+  border-radius: 6px 6px 0 0;
+}
+
+.month-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tariff-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 /* ------------------------------ responsive ----------------------------- */
 
 @media (max-width: 640px) {
@@ -328,5 +447,9 @@ button.ghost.on {
 
   .tile-big {
     font-size: 26px;
+  }
+
+  .live-strips {
+    grid-template-columns: 1fr;
   }
 }

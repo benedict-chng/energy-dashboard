@@ -4,6 +4,7 @@ import type { Bucket, EnergyOverviewPage, RangeKey, ReadingOut, SolarReadingOut 
 import { ErrorBanner } from "./components/ErrorBanner";
 import { NowPanel } from "./components/NowPanel";
 import { OverviewChart } from "./components/OverviewChart";
+import { LiveView } from "./components/LiveView";
 import { formatClock } from "./lib/format";
 
 const REFRESH_MS = 60_000;
@@ -36,6 +37,7 @@ async function allow404<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 export default function App() {
+  const [view, setView] = useState<"charts" | "live">("charts");
   const [range, setRange] = useState<RangeKey>("24h");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [overview, setOverview] = useState<EnergyOverviewPage | null>(null);
@@ -120,20 +122,42 @@ export default function App() {
           </div>
         </div>
         <div className="controls">
-          <div className="segmented" role="tablist" aria-label="Time range">
-            {(Object.keys(RANGES) as RangeKey[]).map((key) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={range === key}
-                className={range === key ? "active" : ""}
-                onClick={() => setRange(key)}
-              >
-                {key === "24h" ? "24 h" : "7 d"}
-              </button>
-            ))}
+          <div className="segmented" role="tablist" aria-label="View">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "charts"}
+              className={view === "charts" ? "active" : ""}
+              onClick={() => setView("charts")}
+            >
+              Charts
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "live"}
+              className={view === "live" ? "active" : ""}
+              onClick={() => setView("live")}
+            >
+              Live
+            </button>
           </div>
+          {view === "charts" ? (
+            <div className="segmented" role="tablist" aria-label="Time range">
+              {(Object.keys(RANGES) as RangeKey[]).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={range === key}
+                  className={range === key ? "active" : ""}
+                  onClick={() => setRange(key)}
+                >
+                  {key === "24h" ? "24 h" : "7 d"}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <button
             type="button"
             className={"ghost" + (autoRefresh ? " on" : "")}
@@ -153,29 +177,35 @@ export default function App() {
         </div>
       </header>
 
-      {error ? <ErrorBanner error={error} onRetry={() => void load(range)} /> : null}
+      {view === "live" ? (
+        <LiveView />
+      ) : (
+        <>
+          {error ? <ErrorBanner error={error} onRetry={() => void load(range)} /> : null}
 
-      <section className="now-grid">
-        <NowPanel
-          grid={now.grid}
-          solar={now.solar}
-          rangeTotalKwh={rangeTotalKwh}
-          rangeLabel={rangeConfig.label}
-          placeholder={!everLoaded}
-        />
-      </section>
+          <section className="now-grid">
+            <NowPanel
+              grid={now.grid}
+              solar={now.solar}
+              rangeTotalKwh={rangeTotalKwh}
+              rangeLabel={rangeConfig.label}
+              placeholder={!everLoaded}
+            />
+          </section>
 
-      <section className={"card chart-card" + (busy && everLoaded ? " refreshing" : "")}>
-        <div className="card-head">
-          <h2>Grid vs solar — last {rangeConfig.label}</h2>
-          <span className="muted">bucket: {rangeConfig.bucket} (UTC)</span>
-        </div>
-        {overview || everLoaded ? (
-          <OverviewChart data={overview} range={range} />
-        ) : (
-          <div className="chart-skeleton">{busy ? "Loading…" : "No data loaded"}</div>
-        )}
-      </section>
+          <section className={"card chart-card" + (busy && everLoaded ? " refreshing" : "")}>
+            <div className="card-head">
+              <h2>Grid vs solar — last {rangeConfig.label}</h2>
+              <span className="muted">bucket: {rangeConfig.bucket} (UTC)</span>
+            </div>
+            {overview || everLoaded ? (
+              <OverviewChart data={overview} range={range} />
+            ) : (
+              <div className="chart-skeleton">{busy ? "Loading…" : "No data loaded"}</div>
+            )}
+          </section>
+        </>
+      )}
 
       <footer className="footer">
         <span>

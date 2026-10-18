@@ -12,6 +12,8 @@ The key is never present in frontend code, the JS bundle, or the browser.
 - Stack: Vite + React 18 + TypeScript + Recharts (no UI framework)
 - Charts: `GET /api/v1/energy/overview` — kWh bars + grid/solar watt lines
 - Now tiles: `GET /api/v1/readings/latest`, `GET /api/v1/solar/readings/latest`
+- Live view: Powerpal-style radial dial ("now using" + est. $/h), last-hour petal fan
+  (1-min buckets), ToU cost strips — see "Live view" below
 - Response types in `src/types.ts` mirror the server's Pydantic schemas exactly
   (`app/schemas/energy.py`, `app/schemas/reading.py`, `app/schemas/solar.py`)
 
@@ -92,6 +94,28 @@ Other scripts:
 
 ---
 
+## Live view (Powerpal-style dial — added 2026-10-18)
+
+The header tabs switch between **Charts** (the original view, untouched) and **Live**:
+
+- **Dial** — current grid import (W) + estimated $/h, colour-coded (< 500 W green,
+  500–3000 W amber, ≥ 3000 W red) on a sqrt-compressed 0–8 kW ring. Petals = the last
+  hour of 1-minute grid buckets, oldest at 12 o'clock.
+- **Freshness** — the Pi ingests once per minute; latest readings poll every 10 s,
+  history + cost strips every 60 s. The "grid reading" chip shows data age and turns
+  red after 10 min of ingest silence.
+- **Solar** — shown separately (gold chip): the meter reads net grid import, so with
+  solar covering the house the dial sits at 0 W — that energy is just free.
+- **Costs** — time-of-use tariff from `src/lib/tariff.ts`:
+  **8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 Melbourne time** (evaluated via ICU, so
+  it stays correct regardless of device timezone). Dollars are estimates: grid import
+  only (solar self-consumption is free); supply/network charges excluded. Edit
+  `TARIFF_WINDOWS` if the plan changes — `npm test` covers the boundary maths.
+- **Monthly bars** — calendar-month ToU totals; the first recorded month (Oct 2026) is
+  partial, since data begins 12 Oct.
+
+---
+
 ## Deployment (wrangler CLI — deployed 2026-10-17)
 
 > The old dashboard click-path (Workers & Pages → Connect to Git) died in the
@@ -134,12 +158,17 @@ project via the Pages API, backed by a proxied CNAME
 
 ## Cloudflare Access (both hostnames — configured 2026-10-17)
 
-Both hostnames sit behind **two** Cloudflare Access self-hosted apps
-(account `Benedict_chng@yahoo.com's Account`), created via the Access API
-(token needs Access: Apps and Policies · Edit):
+Both hostnames sit behind **three** Cloudflare Access self-hosted apps
+(account `Benedict_chng@yahoo.com's Account`), created via the Access API:
 
 1. `Energy Dashboard (custom domain)` → `energy-dashboard.ahbeng.xyz`
 2. `Energy Dashboard (pages.dev)` → `ben-energy-dashboard.pages.dev`
+3. `Energy Dashboard (pages.dev deployments)` → `*.ben-energy-dashboard.pages.dev`
+
+App 3 matters: every `wrangler pages deploy` also publishes the deployment under a
+unique `<hash>.ben-energy-dashboard.pages.dev` URL, which hostname-specific apps do
+NOT cover (confirmed exploitable 2026-10-18 — a hash URL served the SPA + API proxy
+unauthenticated; 30 min exposure window). The wildcard app gates all of them.
 
 Each has one Allow policy: email `benedict_chng@yahoo.com`. Session length:
 **720 h (30 days)** after each login.

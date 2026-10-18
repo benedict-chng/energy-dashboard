@@ -1,0 +1,347 @@
+/**
+ * Powerpal-style live view: a radial "now using" dial with a petal fan of the
+ * last hour (1-minute buckets) plus time-of-use cost strips for today and the
+ * months on record.
+ *
+ * Polling (while this tab is mounted): latest readings every 10 s, dial
+ * history + cost strips every 60 s. The Charts view keeps its own pipeline.
+ *
+ * The Pi ingests once per minute, so "live" means "last completed minute";
+ * the reading age is shown so the dial never overstates its freshness.
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ApiError, api } from "../api/client";
+import type { EnergyOverviewPoint, ReadingOut, SolarReadingOut } from "../types";
+import { ErrorBanner } from "./ErrorBanner";
+import { costByMonth, rateAt, summariseCost } from "../lib/tariff";
+import type { CostTotal, MonthCost } from "../lib/tariff";
+import { formatDollars, formatKwh, formatWattsShort } from "../lib/format";
+
+const FAST_MS = 10_000;
+const SLOW_MS = 60_000;
+const WINDOW_MIN = 60;
+const WINDOW_MS = WINDOW_MIN * 60_000;
+/** Dial scale ceiling (W); sqrt-compressed like the Powerpal ring. */
+const MAX_W = 8000;
+/** Ingest silence longer than this turns the reading-age chip red. */
+const STALE_MS = 10 * 60_000;
+
+const ZONE_COLORS = { low: "#7fbb63", mid: "#e8a33d", high: "#d9534a" } as const;
+type Zone = keyof typeof ZONE_COLORS;
+
+function zoneForWatts(w: number | null): Zone {
+  if (w === null || w < 500) return "low";
+  if (w < 3000) return "mid";
+  return "high";
+}
+
+function toApiError(reason: unknown): ApiError {
+  if (reason instanceof ApiError) return reason;
+  if (reason instanceof Error) return new ApiError(reason.message, 0);
+  return new ApiError(String(reason), 0);
+}
+
+/** 404 on a *latest* endpoint just means "no data yet" — not an error. */
+async function allow404<T>(promise: Promise<T>): Promise<T | null> {
+  try {
+    return await promise;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
+function humanAge(ms: number | null): string {
+  if (ms === null) return "—";
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 90) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.floor(m / 60)}h ${m % 60}m ago`;
+}
+
+/* ----------------------------- dial geometry ----------------------------- */
+
+const SIZE = 340;
+const C = SIZE / 2;
+const RING_R = 150;
+const PETAL_R0 = 58;
+const PETAL_MAX = 56;
+
+const frac = (w: number) => Math.sqrt(Math.max(0, Math.min(w, MAX_W)) / MAX_W);
+const angOf = (w: number) => frac(w) * 360;
+
+function polar(r: number, angleDeg: number): [number, number] {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return [C + r * Math.cos(rad), C + r * Math.sin(rad)];
+}
+
+function arcPath(r: number, a0: number, a1: number): string {
+  const [x0, y0] = polar(r, a0);
+  const [x1, y1] = polar(r, a1);
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+
+const ZONES: ReadonlyArray<{ to: number; zone: Zone }> = [
+  { to: 500, zone: "low" },
+  { to: 3000, zone: "mid" },
+  { to: MAX_W, zone: "high" },
+];
+
+const TICKS: ReadonlyArray<[number, string]> = [
+  [100, "100"],
+  [250, "250"],
+  [500, "500"],
+  [1000, "1k"],
+  [2000, "2k"],
+  [4000, "4k"],
+  [8000, "8k"],
+];
+
+function UsageDial(props: {
+  watts: number | null;
+  centsPerHour: number | null;
+  petals: EnergyOverviewPoint[];
+  windowStartMs: number;
+}) {
+  const { watts, centsPerHour, petals, windowStartMs } = props;
+  const zone = zoneForWatts(watts);
+  const colour = ZONE_COLORS[zone];
+
+  return (
+    <svg
+      className="dial-svg"
+      viewBox={`0 0 ${SIZE} ${SIZE}`}
+      role="img"
+      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}`}
+    >
+      {/* colour zones on the outer ring */}
+      {(() => {
+        let prev = 0;
+        return ZONES.map(({ to, zone: z }) => {
+          const a0 = angOf(prev);
+          const a1 = angOf(to);
+          prev = to;
+          return (
+            <path
+              key={z}
+              d={arcPath(RING_R, a0 + 0.6, a1 - 0.6)}
+              fill="none"
+              stroke={ZONE_COLORS[z]}
+              strokeWidth={6}
+              opacity={0.85}
+              strokeLinecap="butt"
+            />
+          );
+        });
+      })()}
+      {/* scale labels */}
+      {TICKS.map(([w, label]) => {
+        const [x, y] = polar(134, angOf(w));
+        return (
+          <text key={label} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={10.5} fill="#93a1b0">
+            {label}
+          </text>
+        );
+      })}
+      {/* petal fan: last hour of 1-minute grid buckets, oldest at 12 o'clock */}
+      {petals.map((p) => {
+        if (p.avg_grid_watts === null || p.avg_grid_watts <= 0) return null;
+        const ms = new Date(p.bucket).getTime();
+        const angle = ((((ms - windowStartMs) % WINDOW_MS) + WINDOW_MS) % WINDOW_MS) * (360 / WINDOW_MS);
+        const [x0, y0] = polar(PETAL_R0, angle);
+        const [x1, y1] = polar(PETAL_R0 + frac(p.avg_grid_watts) * PETAL_MAX + 3, angle);
+        return (
+          <line key={p.bucket} x1={x0} y1={y0} x2={x1} y2={y1} stroke="rgba(255,255,255,0.30)" strokeWidth={5} strokeLinecap="round" />
+        );
+      })}
+      {/* needle in the annulus between petals and scale labels */}
+      {watts !== null && (() => {
+        const a = angOf(watts);
+        const [x0, y0] = polar(118, a);
+        const [x1, y1] = polar(132, a);
+        return <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#e8edf2" strokeWidth={3.5} strokeLinecap="round" />;
+      })()}
+      {/* centre disc + readout */}
+      <circle cx={C} cy={C} r={94} fill="rgba(13,18,26,0.88)" stroke={colour} strokeWidth={2} opacity={0.96} />
+      <text x={C} y={C - 40} textAnchor="middle" fontSize={12} fill="#93a1b0" letterSpacing={1}>
+        now using
+      </text>
+      <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour}>
+        {watts === null ? "—" : formatWattsShort(watts)}
+      </text>
+      <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2">
+        {centsPerHour === null ? "—" : formatDollars(centsPerHour)}
+      </text>
+      <text x={C} y={C + 54} textAnchor="middle" fontSize={11} fill="#93a1b0">
+        per hour
+      </text>
+    </svg>
+  );
+}
+
+export function LiveView() {
+  const [grid, setGrid] = useState<ReadingOut | null>(null);
+  const [solar, setSolar] = useState<SolarReadingOut | null>(null);
+  const [petals, setPetals] = useState<EnergyOverviewPoint[]>([]);
+  const [todayPts, setTodayPts] = useState<EnergyOverviewPoint[]>([]);
+  const [monthPts, setMonthPts] = useState<EnergyOverviewPoint[]>([]);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+
+  const fetchFast = useCallback(async () => {
+    const [g, s] = await Promise.allSettled([
+      allow404(api.latestGridReading()),
+      allow404(api.latestSolarReading()),
+    ]);
+    if (g.status === "fulfilled") setGrid(g.value);
+    if (s.status === "fulfilled") setSolar(s.value);
+    const firstError =
+      g.status === "rejected" ? toApiError(g.reason) : s.status === "rejected" ? toApiError(s.reason) : null;
+    setError(firstError);
+  }, []);
+
+  const fetchSlow = useCallback(async () => {
+    setBusy(true);
+    try {
+      const now = new Date();
+      const windowStart = new Date(now.getTime() - WINDOW_MS);
+      // Cost day/month boundaries use the browser clock (Ben's devices are
+      // all Melbourne); the tariff itself is Melbourne-correct via ICU.
+      const midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      const [p, t, m] = await Promise.allSettled([
+        api.energyOverview({ from: windowStart.toISOString(), to: now.toISOString(), bucket: "1m" }),
+        api.energyOverview({ from: midnight.toISOString(), to: now.toISOString(), bucket: "1h" }),
+        api.energyOverview({ from: monthStart.toISOString(), to: now.toISOString(), bucket: "1h" }),
+      ]);
+      if (p.status === "fulfilled") setPetals(p.value.points);
+      if (t.status === "fulfilled") setTodayPts(t.value.points);
+      if (m.status === "fulfilled") setMonthPts(m.value.points);
+      const firstError =
+        p.status === "rejected"
+          ? toApiError(p.reason)
+          : t.status === "rejected"
+            ? toApiError(t.reason)
+            : m.status === "rejected"
+              ? toApiError(m.reason)
+              : null;
+      setError(firstError);
+      setLoadedOnce(true);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchFast();
+    void fetchSlow();
+    const fast = window.setInterval(() => void fetchFast(), FAST_MS);
+    const slow = window.setInterval(() => void fetchSlow(), SLOW_MS);
+    return () => {
+      window.clearInterval(fast);
+      window.clearInterval(slow);
+    };
+  }, [fetchFast, fetchSlow]);
+
+  const refetchAll = useCallback(() => {
+    void fetchFast();
+    void fetchSlow();
+  }, [fetchFast, fetchSlow]);
+
+  const gridW = grid ? grid.average_watts : null;
+  const solarW = solar ? solar.average_watts : null;
+  const gridAgeMs = grid ? Date.now() - new Date(grid.time).getTime() : null;
+  const centsPerHour = gridW === null ? null : (gridW / 1000) * rateAt(new Date());
+  const rateNow = rateAt(new Date());
+  const windowStartMs = Date.now() - WINDOW_MS;
+  const stale = gridAgeMs !== null && gridAgeMs > STALE_MS;
+  const zone = zoneForWatts(gridW);
+
+  const today = useMemo<CostTotal>(
+    () => summariseCost(todayPts.map((p) => ({ bucket: p.bucket, kwh: p.consumed_kwh }))),
+    [todayPts],
+  );
+  const months = useMemo<MonthCost[]>(
+    () => costByMonth(monthPts.map((p) => ({ bucket: p.bucket, kwh: p.consumed_kwh }))),
+    [monthPts],
+  );
+  const maxMonthCents = Math.max(1, ...months.map((m) => m.cents));
+
+  return (
+    <div className="live-wrap">
+      {error ? <ErrorBanner error={error} onRetry={refetchAll} /> : null}
+
+      <section className={"card dial-card" + (busy && loadedOnce ? " refreshing" : "")}>
+        <div className="card-head">
+          <h2>Live — grid import</h2>
+          <div className="dial-actions">
+            <span className="muted">latest 10 s · history 60 s</span>
+            <button type="button" className="ghost" onClick={refetchAll}>
+              ↻ Refresh
+            </button>
+          </div>
+        </div>
+        <div className="dial-wrap" data-zone={zone}>
+          <UsageDial watts={gridW} centsPerHour={centsPerHour} petals={petals} windowStartMs={windowStartMs} />
+        </div>
+        <div className="dial-meta">
+          <span className="dial-solar">☀ {solarW === null ? "—" : formatWattsShort(solarW)} solar now</span>
+          <span className={"dial-age" + (stale ? " stale" : "")}>grid reading {humanAge(gridAgeMs)}</span>
+          <span className="dial-rate">{rateNow} c/kWh right now</span>
+        </div>
+      </section>
+
+      <div className="live-strips">
+        <section className="card live-card">
+          <div className="card-head">
+            <h2>Today</h2>
+            <span className="muted">ToU-weighted</span>
+          </div>
+          <div className="strip-row">
+            <div className="strip-item">
+              <span className="strip-big">{formatKwh(today.kwh)}</span>
+              <span className="strip-sub">used</span>
+            </div>
+            <div className="strip-item">
+              <span className="strip-big">{formatDollars(today.cents)}</span>
+              <span className="strip-sub">est. cost</span>
+            </div>
+          </div>
+        </section>
+        <section className="card live-card">
+          <div className="card-head">
+            <h2>Monthly est.</h2>
+            <span className="muted">{months.length === 1 ? "partial month" : "calendar months"}</span>
+          </div>
+          <div className="month-bars">
+            {months.map((m) => (
+              <div className="month-col" key={m.key}>
+                <span className="month-val">{formatDollars(m.cents)}</span>
+                <div className="month-bar">
+                  <div
+                    className="month-bar-fill"
+                    style={{ height: `${Math.max(4, (m.cents / maxMonthCents) * 100)}%` }}
+                  />
+                </div>
+                <span className="month-label">{m.label}</span>
+              </div>
+            ))}
+            {months.length === 0 ? <span className="muted">no data yet</span> : null}
+          </div>
+        </section>
+      </div>
+
+      <div className="tariff-note">
+        ToU tariff estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 (Melbourne time) ·
+        covers grid import only — solar self-consumption is free · supply charge &amp; network
+        fees not included · the first recorded month is partial.
+      </div>
+    </div>
+  );
+}
