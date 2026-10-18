@@ -1,7 +1,11 @@
 /**
- * Powerpal-style live view: a radial "now using" dial with a petal fan of the
- * last hour (1-minute buckets) plus time-of-use cost strips for today and the
- * months on record.
+ * Powerpal-style live view: a 24-hour radial usage dial + time-of-use cost
+ * strips for today and the months on record.
+ *
+ * The dial's circumference is TIME — 6am at 12 o'clock, clockwise a full day
+ * back to 6am. Each 15-minute bar's length is the grid power used in that
+ * slot; the needle marks the current time. Amber ring arc = peak tariff
+ * (6am–midnight), blue arc = off-peak (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -19,8 +23,7 @@ import { formatDollars, formatKwh, formatWattsShort } from "../lib/format";
 
 const FAST_MS = 10_000;
 const SLOW_MS = 60_000;
-const WINDOW_MIN = 60;
-const WINDOW_MS = WINDOW_MIN * 60_000;
+const DAY_MS = 24 * 3600_000;
 /** Dial scale ceiling (W); sqrt-compressed like the Powerpal ring. */
 const MAX_W = 8000;
 /** Ingest silence longer than this turns the reading-age chip red. */
@@ -60,6 +63,14 @@ function humanAge(ms: number | null): string {
   return `${Math.floor(m / 60)}h ${m % 60}m ago`;
 }
 
+/** The most recent 6am (Melbourne browser clock) at or before `now`. */
+export function recentSixAm(now: Date): Date {
+  const d = new Date(now);
+  d.setHours(6, 0, 0, 0);
+  if (d.getTime() > now.getTime()) d.setDate(d.getDate() - 1);
+  return d;
+}
+
 /* ----------------------------- dial geometry ----------------------------- */
 
 const SIZE = 340;
@@ -69,7 +80,6 @@ const PETAL_R0 = 58;
 const PETAL_MAX = 56;
 
 const frac = (w: number) => Math.sqrt(Math.max(0, Math.min(w, MAX_W)) / MAX_W);
-const angOf = (w: number) => frac(w) * 360;
 
 function polar(r: number, angleDeg: number): [number, number] {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
@@ -83,29 +93,31 @@ function arcPath(r: number, a0: number, a1: number): string {
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-const ZONES: ReadonlyArray<{ to: number; zone: Zone }> = [
-  { to: 500, zone: "low" },
-  { to: 3000, zone: "mid" },
-  { to: MAX_W, zone: "high" },
-];
+/** Clockwise angle from 12 o'clock for an instant, given the 6am day start. */
+function dayAngle(ms: number, sixAmMs: number): number {
+  return ((((ms - sixAmMs) % DAY_MS) + DAY_MS) % DAY_MS) * (360 / DAY_MS);
+}
 
-const TICKS: ReadonlyArray<[number, string]> = [
-  [100, "100"],
-  [250, "250"],
-  [500, "500"],
-  [1000, "1k"],
-  [2000, "2k"],
-  [4000, "4k"],
-  [8000, "8k"],
+/** Ring labels every 3 hours, starting from 6am at the top. */
+const HOUR_LABELS: ReadonlyArray<[number, string]> = [
+  [6, "6am"],
+  [9, "9am"],
+  [12, "12pm"],
+  [15, "3pm"],
+  [18, "6pm"],
+  [21, "9pm"],
+  [0, "12am"],
+  [3, "3am"],
 ];
 
 function UsageDial(props: {
   watts: number | null;
   centsPerHour: number | null;
   petals: EnergyOverviewPoint[];
-  windowStartMs: number;
+  sixAmMs: number;
+  nowMs: number;
 }) {
-  const { watts, centsPerHour, petals, windowStartMs } = props;
+  const { watts, centsPerHour, petals, sixAmMs, nowMs } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
 
@@ -114,54 +126,55 @@ function UsageDial(props: {
       className="dial-svg"
       viewBox={`0 0 ${SIZE} ${SIZE}`}
       role="img"
-      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}`}
+      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows today's usage since 6am`}
     >
-      {/* colour zones on the outer ring */}
-      {(() => {
-        let prev = 0;
-        return ZONES.map(({ to, zone: z }) => {
-          const a0 = angOf(prev);
-          const a1 = angOf(to);
-          prev = to;
-          return (
-            <path
-              key={z}
-              d={arcPath(RING_R, a0 + 0.6, a1 - 0.6)}
-              fill="none"
-              stroke={ZONE_COLORS[z]}
-              strokeWidth={6}
-              opacity={0.85}
-              strokeLinecap="butt"
-            />
-          );
-        });
-      })()}
-      {/* scale labels */}
-      {TICKS.map(([w, label]) => {
-        const [x, y] = polar(134, angOf(w));
+      {/* base ring */}
+      <circle cx={C} cy={C} r={RING_R} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={1} />
+      {/* tariff arcs: peak 6am -> midnight (amber), off-peak midnight -> 6am (blue) */}
+      <path d={arcPath(RING_R, 0.5, 269.5)} fill="none" stroke="#e8a33d" strokeWidth={5} opacity={0.30} strokeLinecap="butt" />
+      <path d={arcPath(RING_R, 270.5, 359.5)} fill="none" stroke="#4f8cff" strokeWidth={5} opacity={0.30} strokeLinecap="butt" />
+      {/* hour labels every 3 hours from 6am */}
+      {HOUR_LABELS.map(([h, label]) => {
+        const a = (((h - 6 + 24) % 24) / 24) * 360;
+        const [x, y] = polar(134, a);
         return (
           <text key={label} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={10.5} fill="#93a1b0">
             {label}
           </text>
         );
       })}
-      {/* petal fan: last hour of 1-minute grid buckets, oldest at 12 o'clock */}
+      {/* faint 2 kW reference circle */}
+      <circle
+        cx={C}
+        cy={C}
+        r={PETAL_R0 + frac(2000) * PETAL_MAX}
+        fill="none"
+        stroke="rgba(255,255,255,0.09)"
+        strokeWidth={1}
+        strokeDasharray="3 5"
+      />
+      {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot */}
       {petals.map((p) => {
         if (p.avg_grid_watts === null || p.avg_grid_watts <= 0) return null;
         const ms = new Date(p.bucket).getTime();
-        const angle = ((((ms - windowStartMs) % WINDOW_MS) + WINDOW_MS) % WINDOW_MS) * (360 / WINDOW_MS);
+        const angle = dayAngle(ms, sixAmMs);
         const [x0, y0] = polar(PETAL_R0, angle);
-        const [x1, y1] = polar(PETAL_R0 + frac(p.avg_grid_watts) * PETAL_MAX + 3, angle);
+        const [x1, y1] = polar(PETAL_R0 + frac(p.avg_grid_watts) * PETAL_MAX + 2, angle);
         return (
-          <line key={p.bucket} x1={x0} y1={y0} x2={x1} y2={y1} stroke="rgba(255,255,255,0.30)" strokeWidth={5} strokeLinecap="round" />
+          <line key={p.bucket} x1={x0} y1={y0} x2={x1} y2={y1} stroke="rgba(255,255,255,0.38)" strokeWidth={5} strokeLinecap="round" />
         );
       })}
-      {/* needle in the annulus between petals and scale labels */}
-      {watts !== null && (() => {
-        const a = angOf(watts);
-        const [x0, y0] = polar(118, a);
+      {/* now-marker on the time ring */}
+      {(() => {
+        const a = dayAngle(nowMs, sixAmMs);
+        const [x0, y0] = polar(112, a);
         const [x1, y1] = polar(132, a);
-        return <line x1={x0} y1={y0} x2={x1} y2={y1} stroke="#e8edf2" strokeWidth={3.5} strokeLinecap="round" />;
+        return (
+          <g>
+            <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={colour} strokeWidth={3.5} strokeLinecap="round" />
+            <circle cx={x1} cy={y1} r={3} fill={colour} />
+          </g>
+        );
       })()}
       {/* centre disc + readout */}
       <circle cx={C} cy={C} r={94} fill="rgba(13,18,26,0.88)" stroke={colour} strokeWidth={2} opacity={0.96} />
@@ -187,6 +200,7 @@ export function LiveView() {
   const [petals, setPetals] = useState<EnergyOverviewPoint[]>([]);
   const [todayPts, setTodayPts] = useState<EnergyOverviewPoint[]>([]);
   const [monthPts, setMonthPts] = useState<EnergyOverviewPoint[]>([]);
+  const [sixAmMs, setSixAmMs] = useState<number>(() => recentSixAm(new Date()).getTime());
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
@@ -207,7 +221,7 @@ export function LiveView() {
     setBusy(true);
     try {
       const now = new Date();
-      const windowStart = new Date(now.getTime() - WINDOW_MS);
+      const sixAm = recentSixAm(now);
       // Cost day/month boundaries use the browser clock (Ben's devices are
       // all Melbourne); the tariff itself is Melbourne-correct via ICU.
       const midnight = new Date();
@@ -216,13 +230,14 @@ export function LiveView() {
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
       const [p, t, m] = await Promise.allSettled([
-        api.energyOverview({ from: windowStart.toISOString(), to: now.toISOString(), bucket: "1m" }),
+        api.energyOverview({ from: sixAm.toISOString(), to: now.toISOString(), bucket: "15m" }),
         api.energyOverview({ from: midnight.toISOString(), to: now.toISOString(), bucket: "1h" }),
         api.energyOverview({ from: monthStart.toISOString(), to: now.toISOString(), bucket: "1h" }),
       ]);
       if (p.status === "fulfilled") setPetals(p.value.points);
       if (t.status === "fulfilled") setTodayPts(t.value.points);
       if (m.status === "fulfilled") setMonthPts(m.value.points);
+      setSixAmMs(sixAm.getTime());
       const firstError =
         p.status === "rejected"
           ? toApiError(p.reason)
@@ -259,7 +274,6 @@ export function LiveView() {
   const gridAgeMs = grid ? Date.now() - new Date(grid.time).getTime() : null;
   const centsPerHour = gridW === null ? null : (gridW / 1000) * rateAt(new Date());
   const rateNow = rateAt(new Date());
-  const windowStartMs = Date.now() - WINDOW_MS;
   const stale = gridAgeMs !== null && gridAgeMs > STALE_MS;
   const zone = zoneForWatts(gridW);
 
@@ -279,16 +293,22 @@ export function LiveView() {
 
       <section className={"card dial-card" + (busy && loadedOnce ? " refreshing" : "")}>
         <div className="card-head">
-          <h2>Live — grid import</h2>
+          <h2>Live — today since 6am</h2>
           <div className="dial-actions">
-            <span className="muted">latest 10 s · history 60 s</span>
+            <span className="muted">15-min bars · latest 10 s</span>
             <button type="button" className="ghost" onClick={refetchAll}>
               ↻ Refresh
             </button>
           </div>
         </div>
         <div className="dial-wrap" data-zone={zone}>
-          <UsageDial watts={gridW} centsPerHour={centsPerHour} petals={petals} windowStartMs={windowStartMs} />
+          <UsageDial
+            watts={gridW}
+            centsPerHour={centsPerHour}
+            petals={petals}
+            sixAmMs={sixAmMs}
+            nowMs={Date.now()}
+          />
         </div>
         <div className="dial-meta">
           <span className="dial-solar">☀ {solarW === null ? "—" : formatWattsShort(solarW)} solar now</span>
