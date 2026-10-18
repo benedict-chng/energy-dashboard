@@ -104,9 +104,8 @@ The header tabs switch between **Charts** (the original view, untouched) and **L
   Each 15-minute bar radiates from the CENTRE to the time ring, its length
   being the grid watts used in that slot — **linear-scaled to the day's peak**, so the
   longest bar always reaches the full ring radius (dashed circle = half-peak, labelled
-  with its actual W). Bars are colour-coded by intensity so they pop off the dark ring:
-  blue trickle < 100 W · green low · yellow medium · orange high · red spike ≥ 3 kW;
-  a grey nub = zero draw (solar-covered midday). **Hover a bar** for its time range,
+  with its actual W). Bars are **light grey** (Powerpal-style, full opacity).
+  **Hover a bar** for its time range,
   watts, kWh and ToU cost. The needle marks the current time. Ring arcs follow the
   tariff: amber = peak (6am–midnight), blue = off-peak (midnight–6am). Centre readout
   (current W + est. $/h, colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red)

@@ -77,22 +77,13 @@ export function recentSixAm(now: Date): Date {
 const SIZE = 340;
 const C = SIZE / 2;
 const RING_R = 150;
-/** Bars radiate from (nearly) the centre out to the time ring. */
-const BAR_R0 = 2;
+/** Bars radiate from the centre out to the time ring. */
+const BAR_R0 = 0;
 const BAR_SPAN = RING_R - BAR_R0 - 8;
 
 /** Linear scale to the day's peak: the longest bar reaches the full ring radius. */
 function barRadius(w: number, dayMax: number): number {
   return BAR_R0 + (Math.max(0, Math.min(w, dayMax)) / dayMax) * BAR_SPAN;
-}
-
-/** Bar colour by intensity — pops off the dark ring and encodes load level. */
-function barColor(w: number): string {
-  if (w < 100) return "#4f8cff";
-  if (w < 400) return "#7fbb63";
-  if (w < 1200) return "#e8c33d";
-  if (w < 3000) return "#e8792f";
-  return "#d9534a";
 }
 
 function polar(r: number, angleDeg: number): [number, number] {
@@ -224,19 +215,18 @@ function UsageDial(props: {
       {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
       <circle cx={C} cy={C} r={92} fill="url(#centreFade)" pointerEvents="none" />
 
-      {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot.
-          Coloured by intensity so they pop off the dark ring; each bar owns a wide
-          invisible hit-line so hovering is easy. Zero-draw slots show as short grey
-          nubs so the day's arc is always visible. */}
+      {/* usage bars: circumference = time since 6am, length proportional to the watts
+          in that 15-min slot (linear, day-peak normalized). Light grey like the
+          Powerpal original; each bar owns a wide invisible hit-line so hovering is
+          easy; zero-draw slots collapse to a nub at the centre. */}
       {petals.map((p) => {
         if (p.avg_grid_watts === null || p.avg_grid_watts < 0) return null;
         const ms = new Date(p.bucket).getTime();
         const angle = dayAngle(ms, sixAmMs);
         const w = p.avg_grid_watts;
-        const zero = w === 0;
         const len = barRadius(w, dayMax);
         const [x0, y0] = polar(BAR_R0, angle);
-        const [x1, y1] = polar(zero ? BAR_R0 + 5 : Math.max(len, BAR_R0 + 6), angle);
+        const [x1, y1] = polar(len, angle);
         const [hx0, hy0] = polar(0, angle);
         const [hx1, hy1] = polar(RING_R - 4, angle);
         const hovered = hover?.bucket === p.bucket;
@@ -253,8 +243,8 @@ function UsageDial(props: {
               y1={y0}
               x2={x1}
               y2={y1}
-              stroke={hovered ? "#ffffff" : zero ? "rgba(255,255,255,0.22)" : barColor(w)}
-              strokeWidth={hovered ? 7 : zero ? 3 : 6}
+              stroke={hovered ? "#ffffff" : "#c8cfd8"}
+              strokeWidth={hovered ? 7 : 6}
               strokeLinecap="round"
             />
             <line x1={hx0} y1={hy0} x2={hx1} y2={hy1} stroke="rgba(0,0,0,0)" strokeWidth={12} pointerEvents="stroke" />
@@ -469,9 +459,8 @@ export function LiveView() {
       </div>
 
       <div className="tariff-note">
-        Bar colours: blue trickle · green low · yellow medium · orange high · red spike ·
-        grey nub = zero draw. ToU tariff estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh
-        06:00–24:00 (Melbourne time) ·
+        Bars: light grey, length ∝ power (normalised to today's peak). ToU tariff
+        estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 (Melbourne time) ·
         covers grid import only — solar self-consumption is free · supply charge &amp; network
         fees not included · the first recorded month is partial.
       </div>
