@@ -3,9 +3,11 @@
  * strips for today and the months on record.
  *
  * The dial's circumference is TIME — 6am at 12 o'clock, clockwise a full day
- * back to 6am. Each 15-minute bar's length is the grid power used in that
- * slot; the needle marks the current time. Amber ring arc = peak tariff
- * (6am–midnight), blue arc = off-peak (midnight–6am).
+ * back to 6am. Each 15-minute bar radiates from the CENTRE out to the time
+ * ring, its length being the grid power used in that slot; hovering a bar
+ * shows its time range, watts, kWh and ToU cost. The needle marks the current
+ * time. Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
+ * (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -76,8 +78,9 @@ export function recentSixAm(now: Date): Date {
 const SIZE = 340;
 const C = SIZE / 2;
 const RING_R = 150;
-const PETAL_R0 = 58;
-const PETAL_MAX = 56;
+/** Bars radiate from (nearly) the centre out to the time ring. */
+const BAR_R0 = 2;
+const BAR_SPAN = RING_R - BAR_R0 - 8;
 
 const frac = (w: number) => Math.sqrt(Math.max(0, Math.min(w, MAX_W)) / MAX_W);
 
@@ -110,6 +113,18 @@ const HOUR_LABELS: ReadonlyArray<[number, string]> = [
   [3, "3am"],
 ];
 
+interface HoverSlot {
+  bucket: string;
+  watts: number;
+  kwh: number;
+}
+
+const slotTimeFmt = new Intl.DateTimeFormat("en-AU", {
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
 function UsageDial(props: {
   watts: number | null;
   centsPerHour: number | null;
@@ -120,6 +135,34 @@ function UsageDial(props: {
   const { watts, centsPerHour, petals, sixAmMs, nowMs } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
+  const [hover, setHover] = useState<HoverSlot | null>(null);
+
+  // Tooltip geometry: anchor at the hovered bar's tip, flip to keep it inside.
+  let tip: React.ReactNode = null;
+  if (hover) {
+    const angle = dayAngle(new Date(hover.bucket).getTime(), sixAmMs);
+    const [ax, ay] = polar(120, angle);
+    const boxW = 168;
+    const boxH = 66;
+    const bx = Math.max(2, Math.min(ax >= C ? ax + 10 : ax - boxW - 10, SIZE - boxW - 2));
+    const by = Math.max(2, Math.min(ay - boxH / 2, SIZE - boxH - 2));
+    const start = new Date(hover.bucket);
+    const end = new Date(start.getTime() + 15 * 60_000);
+    tip = (
+      <g pointerEvents="none">
+        <rect x={bx} y={by} width={boxW} height={boxH} rx={8} fill="rgba(13,18,26,0.96)" stroke="rgba(255,255,255,0.18)" />
+        <text x={bx + 10} y={by + 18} fontSize={11} fill="#93a1b0">
+          {slotTimeFmt.format(start)} – {slotTimeFmt.format(end)}
+        </text>
+        <text x={bx + 10} y={by + 37} fontSize={15} fontWeight={700} fill="#e8edf2">
+          {formatWattsShort(hover.watts)}
+        </text>
+        <text x={bx + 10} y={by + 55} fontSize={12} fill="#c8d2dc">
+          {hover.kwh.toFixed(2)} kWh · {(hover.kwh * rateAt(start)).toFixed(1)}c
+        </text>
+      </g>
+    );
+  }
 
   return (
     <svg
@@ -128,6 +171,15 @@ function UsageDial(props: {
       role="img"
       aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows today's usage since 6am`}
     >
+      <defs>
+        {/* soft fade behind the centre readout so bars still radiate from the middle */}
+        <radialGradient id="centreFade">
+          <stop offset="0%" stopColor="rgba(13,18,26,0.96)" />
+          <stop offset="55%" stopColor="rgba(13,18,26,0.86)" />
+          <stop offset="100%" stopColor="rgba(13,18,26,0)" />
+        </radialGradient>
+      </defs>
+
       {/* base ring */}
       <circle cx={C} cy={C} r={RING_R} fill="none" stroke="rgba(255,255,255,0.10)" strokeWidth={1} />
       {/* tariff arcs: peak 6am -> midnight (amber), off-peak midnight -> 6am (blue) */}
@@ -147,49 +199,80 @@ function UsageDial(props: {
       <circle
         cx={C}
         cy={C}
-        r={PETAL_R0 + frac(2000) * PETAL_MAX}
+        r={BAR_R0 + frac(2000) * BAR_SPAN}
         fill="none"
         stroke="rgba(255,255,255,0.09)"
         strokeWidth={1}
         strokeDasharray="3 5"
       />
-      {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot */}
+
+      {/* usage bars: circumference = time since 6am, length = watts in that 15-min slot.
+          Each bar owns a wide invisible hit-line so hovering is easy. */}
       {petals.map((p) => {
-        if (p.avg_grid_watts === null || p.avg_grid_watts <= 0) return null;
+        if (p.avg_grid_watts === null || p.avg_grid_watts < 0) return null;
         const ms = new Date(p.bucket).getTime();
         const angle = dayAngle(ms, sixAmMs);
-        const [x0, y0] = polar(PETAL_R0, angle);
-        const [x1, y1] = polar(PETAL_R0 + frac(p.avg_grid_watts) * PETAL_MAX + 2, angle);
+        const len = BAR_R0 + frac(p.avg_grid_watts) * BAR_SPAN;
+        const [x0, y0] = polar(BAR_R0, angle);
+        const [x1, y1] = polar(len, angle);
+        const [hx0, hy0] = polar(0, angle);
+        const [hx1, hy1] = polar(RING_R - 4, angle);
+        const hovered = hover?.bucket === p.bucket;
         return (
-          <line key={p.bucket} x1={x0} y1={y0} x2={x1} y2={y1} stroke="rgba(255,255,255,0.38)" strokeWidth={5} strokeLinecap="round" />
+          <g
+            key={p.bucket}
+            onMouseEnter={() =>
+              setHover({ bucket: p.bucket, watts: p.avg_grid_watts ?? 0, kwh: p.consumed_kwh })
+            }
+            onMouseLeave={() => setHover((cur) => (cur?.bucket === p.bucket ? null : cur))}
+          >
+            <line
+              x1={x0}
+              y1={y0}
+              x2={x1}
+              y2={y1}
+              stroke={hovered ? "#e8edf2" : "rgba(255,255,255,0.45)"}
+              strokeWidth={hovered ? 6 : 5}
+              strokeLinecap="round"
+            />
+            <line x1={hx0} y1={hy0} x2={hx1} y2={hy1} stroke="rgba(0,0,0,0)" strokeWidth={12} pointerEvents="stroke" />
+          </g>
         );
       })}
+
+      {/* soft fade behind the readout (bars still radiate from the centre) */}
+      <circle cx={C} cy={C} r={116} fill="url(#centreFade)" pointerEvents="none" />
+
       {/* now-marker on the time ring */}
       {(() => {
         const a = dayAngle(nowMs, sixAmMs);
         const [x0, y0] = polar(112, a);
         const [x1, y1] = polar(132, a);
         return (
-          <g>
+          <g pointerEvents="none">
             <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={colour} strokeWidth={3.5} strokeLinecap="round" />
             <circle cx={x1} cy={y1} r={3} fill={colour} />
           </g>
         );
       })()}
-      {/* centre disc + readout */}
-      <circle cx={C} cy={C} r={94} fill="rgba(13,18,26,0.88)" stroke={colour} strokeWidth={2} opacity={0.96} />
-      <text x={C} y={C - 40} textAnchor="middle" fontSize={12} fill="#93a1b0" letterSpacing={1}>
-        now using
-      </text>
-      <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour}>
-        {watts === null ? "—" : formatWattsShort(watts)}
-      </text>
-      <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2">
-        {centsPerHour === null ? "—" : formatDollars(centsPerHour)}
-      </text>
-      <text x={C} y={C + 54} textAnchor="middle" fontSize={11} fill="#93a1b0">
-        per hour
-      </text>
+
+      {/* centre readout */}
+      <g pointerEvents="none">
+        <text x={C} y={C - 40} textAnchor="middle" fontSize={12} fill="#93a1b0" letterSpacing={1}>
+          now using
+        </text>
+        <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour}>
+          {watts === null ? "—" : formatWattsShort(watts)}
+        </text>
+        <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2">
+          {centsPerHour === null ? "—" : formatDollars(centsPerHour)}
+        </text>
+        <text x={C} y={C + 54} textAnchor="middle" fontSize={11} fill="#93a1b0">
+          per hour
+        </text>
+      </g>
+
+      {tip}
     </svg>
   );
 }
@@ -295,7 +378,7 @@ export function LiveView() {
         <div className="card-head">
           <h2>Live — today since 6am</h2>
           <div className="dial-actions">
-            <span className="muted">15-min bars · latest 10 s</span>
+            <span className="muted">15-min bars · hover for numbers</span>
             <button type="button" className="ghost" onClick={refetchAll}>
               ↻ Refresh
             </button>

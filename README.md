@@ -99,11 +99,13 @@ Other scripts:
 The header tabs switch between **Charts** (the original view, untouched) and **Live**:
 
 - **Dial** — the circumference is TIME: 6am at 12 o'clock, clockwise a full day back
-  to 6am. Each 15-minute bar's length is the grid watts used in that slot
-  (sqrt-scaled to 8 kW; faint dashed circle = 2 kW reference). The needle marks the
-  current time. Ring arcs follow the tariff: amber = peak (6am–midnight), blue =
-  off-peak (midnight–6am). Centre: current W + est. $/h, colour-coded (< 500 W green,
-  500–3000 W amber, ≥ 3000 W red).
+  to 6am. Each 15-minute bar radiates from the CENTRE to the time ring, its length
+  being the grid watts used in that slot (sqrt-scaled to 8 kW; faint dashed circle =
+  2 kW reference). **Hover a bar** for its time range, watts, kWh and ToU cost. The
+  needle marks the current time. Ring arcs follow the tariff: amber = peak
+  (6am–midnight), blue = off-peak (midnight–6am). Centre readout (current W + est.
+  $/h, colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red) sits on a soft
+  fade so the bars still radiate from the middle.
 - **Freshness** — the Pi ingests once per minute; latest readings poll every 10 s,
   history + cost strips every 60 s. The "grid reading" chip shows data age and turns
   red after 10 min of ingest silence.
