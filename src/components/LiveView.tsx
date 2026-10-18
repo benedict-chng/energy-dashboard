@@ -3,11 +3,12 @@
  * strips for today and the months on record.
  *
  * The dial's circumference is TIME — 6am at 12 o'clock, clockwise a full day
- * back to 6am. Each 15-minute bar radiates from the CENTRE out to the time
- * ring, its length being the grid power used in that slot; hovering a bar
- * shows its time range, watts, kWh and ToU cost. The needle marks the current
- * time. Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
- * (midnight–6am).
+ * back to 6am, populated with the ROLLING last 24 hours of 15-minute buckets
+ * (overnight slots show this morning's early hours; the needle marks "now").
+ * Each 15-minute bar radiates from the CENTRE out to the time ring, its
+ * length being the grid power used in that slot; hovering a bar shows its
+ * time range, watts, kWh and ToU cost. Amber ring arc = peak tariff
+ * (6am–midnight), blue arc = off-peak (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -180,7 +181,7 @@ function UsageDial(props: {
       className="dial-svg"
       viewBox={`0 0 ${SIZE} ${SIZE}`}
       role="img"
-      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows today's usage since 6am`}
+      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows the last 24 hours`}
     >
       <defs>
         {/* soft fade behind the centre readout so bars still radiate from the middle */}
@@ -323,6 +324,9 @@ export function LiveView() {
     try {
       const now = new Date();
       const sixAm = recentSixAm(now);
+      // Ring data = rolling last 24 h, so overnight slots (12am–6am) always show
+      // the most recent occurrence of those clock times.
+      const windowStart = new Date(now.getTime() - DAY_MS);
       // Cost day/month boundaries use the browser clock (Ben's devices are
       // all Melbourne); the tariff itself is Melbourne-correct via ICU.
       const midnight = new Date();
@@ -331,7 +335,7 @@ export function LiveView() {
       monthStart.setDate(1);
       monthStart.setHours(0, 0, 0, 0);
       const [p, t, m] = await Promise.allSettled([
-        api.energyOverview({ from: sixAm.toISOString(), to: now.toISOString(), bucket: "15m" }),
+        api.energyOverview({ from: windowStart.toISOString(), to: now.toISOString(), bucket: "15m" }),
         api.energyOverview({ from: midnight.toISOString(), to: now.toISOString(), bucket: "1h" }),
         api.energyOverview({ from: monthStart.toISOString(), to: now.toISOString(), bucket: "1h" }),
       ]);
@@ -399,7 +403,7 @@ export function LiveView() {
 
       <section className={"card dial-card" + (busy && loadedOnce ? " refreshing" : "")}>
         <div className="card-head">
-          <h2>Live — today since 6am</h2>
+          <h2>Live — last 24 hours</h2>
           <div className="dial-actions">
             <span className="muted">15-min bars · hover for numbers</span>
             <button type="button" className="ghost" onClick={refetchAll}>
