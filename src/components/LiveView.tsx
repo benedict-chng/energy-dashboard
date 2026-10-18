@@ -8,9 +8,10 @@
  * the needle marks "now").
  * Each 15-minute bar radiates from 0.4r to 0.85r with squared ends, its
  * length being the grid power used in that slot; hovering a bar shows its
- * time range, watts, kWh and ToU cost. The centre shows the current watts
- * only. Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
- * (midnight–6am).
+ * time range, watts, kWh, ToU cost and solar. A thin gold line traces solar
+ * generation around the outside of the bars. The centre shows the current
+ * watts only. Amber ring arc = peak tariff (6am–midnight), blue arc =
+ * off-peak (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -120,6 +121,7 @@ const HOUR_LABELS: ReadonlyArray<[number, string]> = [
 interface HoverSlot {
   bucket: string;
   watts: number;
+  solar: number | null;
   kwh: number;
 }
 
@@ -146,8 +148,8 @@ function UsageDial(props: {
   if (hover) {
     const angle = dayAngle(new Date(hover.bucket).getTime(), sixAmMs);
     const [ax, ay] = polar(120, angle);
-    const boxW = 168;
-    const boxH = 66;
+    const boxW = 170;
+    const boxH = 84;
     const bx = Math.max(2, Math.min(ax >= C ? ax + 10 : ax - boxW - 10, SIZE - boxW - 2));
     const by = Math.max(2, Math.min(ay - boxH / 2, SIZE - boxH - 2));
     const start = new Date(hover.bucket);
@@ -163,6 +165,9 @@ function UsageDial(props: {
         </text>
         <text x={bx + 10} y={by + 55} fontSize={12} fill="#c8d2dc">
           {hover.kwh.toFixed(2)} kWh · {(hover.kwh * rateAt(start)).toFixed(1)}c
+        </text>
+        <text x={bx + 10} y={by + 73} fontSize={12} fill="#e5c04b">
+          ☀ {hover.solar === null ? "—" : formatWattsShort(hover.solar)} solar
         </text>
       </g>
     );
@@ -213,6 +218,30 @@ function UsageDial(props: {
         {formatWattsShort(dayMax / 2)}
       </text>
 
+      {/* solar generation: thin gold line weaving between bar tips and the ring */}
+      {(() => {
+        const solarMax = Math.max(1000, ...petals.map((p) => p.avg_solar_watts ?? 0));
+        const pts = petals
+          .filter((p) => p.avg_solar_watts !== null)
+          .map((p) => {
+            const ms = new Date(p.bucket).getTime();
+            const s = Math.max(0, Math.min(p.avg_solar_watts ?? 0, solarMax));
+            const [x, y] = polar(130 + (s / solarMax) * 13, dayAngle(ms, sixAmMs));
+            return `${x.toFixed(2)} ${y.toFixed(2)}`;
+          });
+        return pts.length >= 2 ? (
+          <polyline
+            points={pts.join(" ")}
+            fill="none"
+            stroke="#e5c04b"
+            strokeWidth={2.5}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            opacity={0.9}
+          />
+        ) : null;
+      })()}
+
       {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
       <circle cx={C} cy={C} r={50} fill="url(#centreFade)" pointerEvents="none" />
 
@@ -235,7 +264,7 @@ function UsageDial(props: {
           <g
             key={p.bucket}
             onMouseEnter={() =>
-              setHover({ bucket: p.bucket, watts: w, kwh: p.consumed_kwh })
+              setHover({ bucket: p.bucket, watts: w, solar: p.avg_solar_watts, kwh: p.consumed_kwh })
             }
             onMouseLeave={() => setHover((cur) => (cur?.bucket === p.bucket ? null : cur))}
           >

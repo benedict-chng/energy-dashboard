@@ -37,7 +37,7 @@ async function allow404<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 export default function App() {
-  const [view, setView] = useState<"charts" | "live">("charts");
+  const [view, setView] = useState<"charts" | "live">("live");
   const [range, setRange] = useState<RangeKey>("24h");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [overview, setOverview] = useState<EnergyOverviewPage | null>(null);
