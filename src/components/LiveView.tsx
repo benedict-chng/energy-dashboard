@@ -6,10 +6,11 @@
  * back to 6am, populated with TODAY's 15-minute buckets (midnight -> now; the
  * arc between "now" and midnight stays blank until tonight actually happens;
  * the needle marks "now").
- * Each 15-minute bar radiates from 0.5r (half the ring radius) outward to
- * the time ring, its length being the grid power used in that slot; hovering
- * a bar shows its time range, watts, kWh and ToU cost. Amber ring arc = peak
- * tariff (6am–midnight), blue arc = off-peak (midnight–6am).
+ * Each 15-minute bar radiates from 0.35r to 0.9r with squared ends, its
+ * length being the grid power used in that slot; hovering a bar shows its
+ * time range, watts, kWh and ToU cost. The centre shows the current watts
+ * only. Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
+ * (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -78,9 +79,9 @@ export function recentSixAm(now: Date): Date {
 const SIZE = 340;
 const C = SIZE / 2;
 const RING_R = 150;
-/** Bars radiate from half the ring radius (0.5r) outward to the time ring. */
-const BAR_R0 = RING_R / 2;
-const BAR_SPAN = RING_R - BAR_R0 - 8;
+/** Bars radiate from 0.35r out to 0.9r with squared ends (no rounding). */
+const BAR_R0 = 0.35 * RING_R;
+const BAR_SPAN = 0.9 * RING_R - BAR_R0;
 
 /** Linear scale to the day's peak: the longest bar reaches the full ring radius. */
 function barRadius(w: number, dayMax: number): number {
@@ -130,13 +131,12 @@ const slotTimeFmt = new Intl.DateTimeFormat("en-AU", {
 
 function UsageDial(props: {
   watts: number | null;
-  centsPerHour: number | null;
   petals: EnergyOverviewPoint[];
   sixAmMs: number;
   nowMs: number;
   dayMax: number;
 }) {
-  const { watts, centsPerHour, petals, sixAmMs, nowMs, dayMax } = props;
+  const { watts, petals, sixAmMs, nowMs, dayMax } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
   const [hover, setHover] = useState<HoverSlot | null>(null);
@@ -214,7 +214,7 @@ function UsageDial(props: {
       </text>
 
       {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
-      <circle cx={C} cy={C} r={92} fill="url(#centreFade)" pointerEvents="none" />
+      <circle cx={C} cy={C} r={50} fill="url(#centreFade)" pointerEvents="none" />
 
       {/* usage bars: circumference = time since 6am; each bar starts at 0.5r and its
           length is proportional to the watts in that 15-min slot (linear, day-peak
@@ -246,7 +246,7 @@ function UsageDial(props: {
               y2={y1}
               stroke={hovered ? "#ffffff" : "#c8cfd8"}
               strokeWidth={hovered ? 7 : 6}
-              strokeLinecap="round"
+              strokeLinecap="butt"
             />
             <line x1={hx0} y1={hy0} x2={hx1} y2={hy1} stroke="rgba(0,0,0,0)" strokeWidth={12} pointerEvents="stroke" />
           </g>
@@ -268,17 +268,8 @@ function UsageDial(props: {
 
       {/* centre readout */}
       <g pointerEvents="none">
-        <text x={C} y={C - 40} textAnchor="middle" fontSize={12} fill="#93a1b0" letterSpacing={1}>
-          now using
-        </text>
-        <text x={C} y={C + 6} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour} stroke="rgba(13,18,26,0.9)" strokeWidth={5} paintOrder="stroke">
+        <text x={C} y={C + 10} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour} stroke="rgba(13,18,26,0.9)" strokeWidth={5} paintOrder="stroke">
           {watts === null ? "—" : formatWattsShort(watts)}
-        </text>
-        <text x={C} y={C + 36} textAnchor="middle" fontSize={19} fontWeight={600} fill="#e8edf2" stroke="rgba(13,18,26,0.9)" strokeWidth={4} paintOrder="stroke">
-          {centsPerHour === null ? "—" : formatDollars(centsPerHour)}
-        </text>
-        <text x={C} y={C + 54} textAnchor="middle" fontSize={11} fill="#93a1b0">
-          per hour
         </text>
       </g>
 
@@ -365,7 +356,6 @@ export function LiveView() {
   const gridW = grid ? grid.average_watts : null;
   const solarW = solar ? solar.average_watts : null;
   const gridAgeMs = grid ? Date.now() - new Date(grid.time).getTime() : null;
-  const centsPerHour = gridW === null ? null : (gridW / 1000) * rateAt(new Date());
   const rateNow = rateAt(new Date());
   const stale = gridAgeMs !== null && gridAgeMs > STALE_MS;
   const zone = zoneForWatts(gridW);
@@ -402,7 +392,6 @@ export function LiveView() {
         <div className="dial-wrap" data-zone={zone}>
           <UsageDial
             watts={gridW}
-            centsPerHour={centsPerHour}
             petals={petals}
             sixAmMs={sixAmMs}
             nowMs={Date.now()}

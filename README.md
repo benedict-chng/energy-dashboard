@@ -101,16 +101,13 @@ The header tabs switch between **Charts** (the original view, untouched) and **L
 - **Dial** — the circumference is TIME: 6am at 12 o'clock, clockwise a full day back
   to 6am, filled with TODAY so far (midnight → now). The arc between "now" and
   midnight stays blank until tonight actually happens; the needle marks "now".
-  Each 15-minute bar radiates from 0.5r (half the ring radius) outward to the
-  time ring, its length being the grid watts used in that slot — **linear-scaled
-  to the day's peak**, so the
-  longest bar always reaches the full ring radius (dashed circle = half-peak, labelled
-  with its actual W). Bars are **light grey** (Powerpal-style, full opacity).
-  **Hover a bar** for its time range,
-  watts, kWh and ToU cost. The needle marks the current time. Ring arcs follow the
-  tariff: amber = peak (6am–midnight), blue = off-peak (midnight–6am). Centre readout
-  (current W + est. $/h, colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red)
-  sits on a backdrop fade BEHIND the bars, so bars render at full opacity.
+  Each 15-minute bar radiates from 0.35r to 0.9r with squared (butt) ends, light
+  grey at full opacity, its length linear-proportional to the grid watts used in
+  that slot (normalised to the day's peak; dashed circle = half-peak, labelled with
+  its actual W). **Hover a bar** for its time range, watts, kWh and ToU cost. Ring
+  arcs follow the tariff: amber = peak (6am–midnight), blue = off-peak
+  (midnight–6am). The centre shows the current watts only (colour-coded < 500 W
+  green / 500–3000 W amber / ≥ 3000 W red) on a small backdrop fade.
 - **Freshness** — the Pi ingests once per minute; latest readings poll every 10 s,
   history + cost strips every 60 s. The "grid reading" chip shows data age and turns
   red after 10 min of ingest silence.
