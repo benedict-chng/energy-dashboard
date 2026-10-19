@@ -20,7 +20,7 @@
  * The Pi ingests once per minute, so "live" means "last completed minute";
  * the reading age is shown so the dial never overstates its freshness.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api } from "../api/client";
 import type { EnergyOverviewPoint, ReadingOut, SolarReadingOut } from "../types";
 import { ErrorBanner } from "./ErrorBanner";
@@ -169,8 +169,12 @@ function UsageDial(props: {
   sixAmMs: number;
   nowMs: number;
   dayMax: number;
+  /** "today" (default): live dial with now-marker; "day": a completed past day. */
+  mode?: "today" | "day";
+  /** Day total kWh shown in the centre when mode === "day". */
+  dayTotalKwh?: number | null;
 }) {
-  const { watts, petals, sixAmMs, nowMs, dayMax } = props;
+  const { watts, petals, sixAmMs, nowMs, dayMax, mode = "today", dayTotalKwh = null } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
   const [hover, setHover] = useState<HoverSlot | null>(null);
@@ -210,7 +214,11 @@ function UsageDial(props: {
       className="dial-svg"
       viewBox={`0 0 ${SIZE} ${SIZE}`}
       role="img"
-      aria-label={`Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows today's usage so far`}
+      aria-label={
+        mode === "day"
+          ? `Viewing a past day: ${dayTotalKwh === null ? "—" : formatKwh(dayTotalKwh)} of grid use; ring shows that day's 15-minute slots`
+          : `Now using ${watts === null ? "unknown" : formatWattsShort(watts)}; ring shows today's usage so far`
+      }
     >
       <defs>
         {/* soft fade behind the centre readout so bars still radiate from the middle */}
@@ -322,24 +330,47 @@ function UsageDial(props: {
         );
       })}
 
-      {/* now-marker on the time ring */}
-      {(() => {
-        const a = dayAngle(nowMs, sixAmMs);
-        const [x0, y0] = polar(112, a);
-        const [x1, y1] = polar(132, a);
-        return (
-          <g pointerEvents="none">
-            <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={colour} strokeWidth={3.5} strokeLinecap="round" />
-            <circle cx={x1} cy={y1} r={3} fill={colour} />
-          </g>
-        );
-      })()}
+      {/* now-marker on the time ring (live view only — a past day has no "now") */}
+      {mode === "today"
+        ? (() => {
+            const a = dayAngle(nowMs, sixAmMs);
+            const [x0, y0] = polar(112, a);
+            const [x1, y1] = polar(132, a);
+            return (
+              <g pointerEvents="none">
+                <line x1={x0} y1={y0} x2={x1} y2={y1} stroke={colour} strokeWidth={3.5} strokeLinecap="round" />
+                <circle cx={x1} cy={y1} r={3} fill={colour} />
+              </g>
+            );
+          })()
+        : null}
 
-      {/* centre readout */}
+      {/* centre readout — live watts (today) or the viewed day's total kWh */}
       <g pointerEvents="none">
-        <text x={C} y={C + 10} textAnchor="middle" fontSize={38} fontWeight={700} fill={watts === null ? "#93a1b0" : colour} stroke="rgba(13,18,26,0.9)" strokeWidth={5} paintOrder="stroke">
-          {watts === null ? "—" : formatWattsShort(watts)}
+        <text
+          x={C}
+          y={C + 10}
+          textAnchor="middle"
+          fontSize={mode === "day" ? 27 : 38}
+          fontWeight={700}
+          fill={mode === "day" ? "#e8edf2" : watts === null ? "#93a1b0" : colour}
+          stroke="rgba(13,18,26,0.9)"
+          strokeWidth={5}
+          paintOrder="stroke"
+        >
+          {mode === "day"
+            ? dayTotalKwh === null
+              ? "—"
+              : formatKwh(dayTotalKwh)
+            : watts === null
+              ? "—"
+              : formatWattsShort(watts)}
         </text>
+        {mode === "day" ? (
+          <text x={C} y={C + 30} textAnchor="middle" fontSize={10.5} fill="#93a1b0">
+            used that day
+          </text>
+        ) : null}
       </g>
 
       {tip}
@@ -354,6 +385,13 @@ export function LiveView() {
   const [todayPts, setTodayPts] = useState<EnergyOverviewPoint[]>([]);
   const [monthPts, setMonthPts] = useState<EnergyOverviewPoint[]>([]);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  /** 15-min buckets for the selected past day; null while loading / viewing live. */
+  const [dayPetals, setDayPetals] = useState<EnergyOverviewPoint[] | null>(null);
+  const [dayLoading, setDayLoading] = useState(false);
+  /** Retry nonce for the selected-day fetch (bumped by Refresh). */
+  const [dayRetry, setDayRetry] = useState(0);
+  /** Past days never change — cache their 15-min fetches by day key. */
+  const dayCache = useRef<Map<string, EnergyOverviewPoint[]>>(new Map());
   const [sixAmMs, setSixAmMs] = useState<number>(() => recentSixAm(new Date()).getTime());
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -421,7 +459,11 @@ export function LiveView() {
   const refetchAll = useCallback(() => {
     void fetchFast();
     void fetchSlow();
-  }, [fetchFast, fetchSlow]);
+    if (selectedDay) {
+      dayCache.current.delete(selectedDay);
+      setDayRetry((n) => n + 1);
+    }
+  }, [fetchFast, fetchSlow, selectedDay]);
 
   const gridW = grid ? grid.average_watts : null;
   const solarW = solar ? solar.average_watts : null;
@@ -480,10 +522,51 @@ export function LiveView() {
     return hours;
   }, [selDay]);
   const selHourMax = selHours ? Math.max(0.0001, ...selHours) : 1;
+
+  /** Fetch (or take from cache) the selected day's 15-min buckets. */
+  useEffect(() => {
+    if (!selectedDay) {
+      setDayPetals(null);
+      return;
+    }
+    const cached = dayCache.current.get(selectedDay);
+    if (cached) {
+      setDayPetals(cached);
+      return;
+    }
+    const [dd, mm, yyyy] = selectedDay.split("/").map(Number);
+    if (!dd || !mm || !yyyy) return;
+    const start = new Date(yyyy, mm - 1, dd); // Melbourne midnight (browser clock)
+    const end = new Date(start.getTime() + DAY_MS);
+    let cancelled = false;
+    setDayLoading(true);
+    api
+      .energyOverview({ from: start.toISOString(), to: end.toISOString(), bucket: "15m" })
+      .then((page) => {
+        if (cancelled) return;
+        dayCache.current.set(selectedDay, page.points);
+        setDayPetals(page.points);
+      })
+      .catch(() => {
+        /* keep whatever was shown; Refresh retries */
+      })
+      .finally(() => {
+        if (!cancelled) setDayLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDay, dayRetry]);
   /** Day's peak draw — the dial scale pins to this so the longest bar reaches the ring. */
   const dayMax = useMemo(
     () => Math.max(1000, ...petals.map((p) => p.avg_grid_watts ?? 0)),
     [petals],
+  );
+  /** Scale for the dial when viewing a past day: that day's own peak. */
+  const viewDayMax = useMemo(
+    () =>
+      selectedDay && dayPetals ? Math.max(1000, ...dayPetals.map((p) => p.avg_grid_watts ?? 0)) : dayMax,
+    [selectedDay, dayPetals, dayMax],
   );
 
   return (
@@ -492,9 +575,20 @@ export function LiveView() {
 
       <section className={"card dial-card" + (busy && loadedOnce ? " refreshing" : "")}>
         <div className="card-head">
-          <h2>Live — today so far</h2>
+          <h2>{selDay ? selDay.label : "Live — today so far"}</h2>
           <div className="dial-actions">
-            <span className="muted">blue = grid · green = solar · hover for numbers</span>
+            <span className="muted">
+              {selDay
+                ? dayLoading
+                  ? "loading 15-min slots…"
+                  : "that day · tap the bar again or ↩ Live for today"
+                : "blue = grid · green = solar · hover for numbers"}
+            </span>
+            {selDay ? (
+              <button type="button" className="ghost" onClick={() => setSelectedDay(null)}>
+                ↩ Live
+              </button>
+            ) : null}
             <button type="button" className="ghost" onClick={refetchAll}>
               ↻ Refresh
             </button>
@@ -503,16 +597,30 @@ export function LiveView() {
         <div className="dial-wrap" data-zone={zone}>
           <UsageDial
             watts={gridW}
-            petals={petals}
+            petals={selDay ? (dayPetals ?? []) : petals}
             sixAmMs={sixAmMs}
             nowMs={Date.now()}
-            dayMax={dayMax}
+            dayMax={selDay ? viewDayMax : dayMax}
+            mode={selDay ? "day" : "today"}
+            dayTotalKwh={selDay ? selDay.kwh : null}
           />
         </div>
         <div className="dial-meta">
-          <span className="dial-solar">☀ {solarW === null ? "—" : formatWattsShort(solarW)} solar now</span>
-          <span className={"dial-age" + (stale ? " stale" : "")}>grid reading {humanAge(gridAgeMs)}</span>
-          <span className="dial-rate">{rateNow} c/kWh right now</span>
+          {selDay ? (
+            <>
+              <span className="dial-solar">
+                ☀ {selDay.solarKwh === null ? "—" : formatKwh(selDay.solarKwh)} solar that day
+              </span>
+              <span className="muted">peak {formatWattsShort(viewDayMax)}</span>
+              <span className="dial-rate">{formatDollars(selDay.cents)} est. that day</span>
+            </>
+          ) : (
+            <>
+              <span className="dial-solar">☀ {solarW === null ? "—" : formatWattsShort(solarW)} solar now</span>
+              <span className={"dial-age" + (stale ? " stale" : "")}>grid reading {humanAge(gridAgeMs)}</span>
+              <span className="dial-rate">{rateNow} c/kWh right now</span>
+            </>
+          )}
         </div>
       </section>
 

@@ -124,8 +124,9 @@ Other scripts:
   `TARIFF_WINDOWS` if the plan changes — `npm test` covers the boundary maths.
 - **This month** — one bar per complete day, 1st → yesterday, height ∝ ToU-weighted
   daily cost. Tap a bar for the day's kWh / est. $ / solar kWh plus its 24-hour
-  profile (dim = off-peak 8c, bright = peak 27c). Today's partial day joins when it
-  completes; data begins 12 Oct 2026.
+  profile — and the big dial above swaps to that day's 15-minute slots (centre shows
+  the day total; "↩ Live" or tapping the bar again returns to the live view).
+  Today's partial day joins when it completes; data begins 12 Oct 2026.
 
 ---
 
