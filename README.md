@@ -122,8 +122,10 @@ Other scripts:
   it stays correct regardless of device timezone). Dollars are estimates: grid import
   only (solar self-consumption is free); supply/network charges excluded. Edit
   `TARIFF_WINDOWS` if the plan changes — `npm test` covers the boundary maths.
-- **Monthly bars** — calendar-month ToU totals; the first recorded month (Oct 2026) is
-  partial, since data begins 12 Oct.
+- **This month** — one bar per complete day, 1st → yesterday, height ∝ ToU-weighted
+  daily cost. Tap a bar for the day's kWh / est. $ / solar kWh plus its 24-hour
+  profile (dim = off-peak 8c, bright = peak 27c). Today's partial day joins when it
+  completes; data begins 12 Oct 2026.
 
 ---
 

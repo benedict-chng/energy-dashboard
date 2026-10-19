@@ -1,6 +1,6 @@
 /**
  * Powerpal-style live view: a 24-hour radial usage dial + time-of-use cost
- * strips for today and the months on record.
+ * strips for today and day-by-day history for the month to date.
  *
  * The dial's circumference is TIME — 6am at 12 o'clock, clockwise a full day
  * back to 6am, populated with TODAY's 15-minute buckets (midnight -> now; the
@@ -24,8 +24,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, api } from "../api/client";
 import type { EnergyOverviewPoint, ReadingOut, SolarReadingOut } from "../types";
 import { ErrorBanner } from "./ErrorBanner";
-import { costByMonth, rateAt, summariseCost } from "../lib/tariff";
-import type { CostTotal, MonthCost } from "../lib/tariff";
+import { melbourneHour, rateAt, summariseCost } from "../lib/tariff";
+import type { CostTotal } from "../lib/tariff";
 import { formatDollars, formatKwh, formatWattsShort } from "../lib/format";
 
 const FAST_MS = 10_000;
@@ -135,6 +135,33 @@ const slotTimeFmt = new Intl.DateTimeFormat("en-AU", {
   minute: "2-digit",
   hour12: true,
 });
+
+/** Melbourne day key ("DD/MM/YYYY") — groups hourly buckets into local days. */
+const melbDayKeyFmt = new Intl.DateTimeFormat("en-AU", {
+  timeZone: "Australia/Melbourne",
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+});
+
+/** "Sat, 18 Oct"-style label on the Melbourne wall clock. */
+const melbDayLabelFmt = new Intl.DateTimeFormat("en-AU", {
+  timeZone: "Australia/Melbourne",
+  weekday: "short",
+  day: "numeric",
+  month: "short",
+});
+
+/** One bar in the "This month" daily history card. */
+interface DayBar {
+  key: string;
+  dayNum: number;
+  label: string;
+  kwh: number;
+  cents: number;
+  solarKwh: number | null;
+  points: EnergyOverviewPoint[];
+}
 
 function UsageDial(props: {
   watts: number | null;
@@ -326,6 +353,7 @@ export function LiveView() {
   const [petals, setPetals] = useState<EnergyOverviewPoint[]>([]);
   const [todayPts, setTodayPts] = useState<EnergyOverviewPoint[]>([]);
   const [monthPts, setMonthPts] = useState<EnergyOverviewPoint[]>([]);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [sixAmMs, setSixAmMs] = useState<number>(() => recentSixAm(new Date()).getTime());
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -406,11 +434,52 @@ export function LiveView() {
     () => summariseCost(todayPts.map((p) => ({ bucket: p.bucket, kwh: p.consumed_kwh }))),
     [todayPts],
   );
-  const months = useMemo<MonthCost[]>(
-    () => costByMonth(monthPts.map((p) => ({ bucket: p.bucket, kwh: p.consumed_kwh }))),
-    [monthPts],
-  );
-  const maxMonthCents = Math.max(1, ...months.map((m) => m.cents));
+  /** One bar per complete Melbourne day, 1st of month → yesterday (today is
+      excluded until it completes). Cost is ToU-weighted per hour via
+      summariseCost; solar kWh integrates the hourly avg watts (avg W × 1 h). */
+  const days = useMemo<DayBar[]>(() => {
+    const todayKey = melbDayKeyFmt.format(new Date());
+    const byDay = new Map<string, EnergyOverviewPoint[]>();
+    for (const p of monthPts) {
+      const key = melbDayKeyFmt.format(new Date(p.bucket));
+      if (key >= todayKey) continue; // today's partial day not shown yet
+      const arr = byDay.get(key);
+      if (arr) arr.push(p);
+      else byDay.set(key, [p]);
+    }
+    return [...byDay.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, pts]) => {
+        pts.sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
+        const first = pts[0];
+        const { kwh, cents } = summariseCost(
+          pts.map((p) => ({ bucket: p.bucket, kwh: p.consumed_kwh })),
+        );
+        let solarWh: number | null = null;
+        for (const p of pts) {
+          if (p.avg_solar_watts !== null) solarWh = (solarWh ?? 0) + p.avg_solar_watts;
+        }
+        return {
+          key,
+          dayNum: Number(key.slice(0, 2)),
+          label: first ? melbDayLabelFmt.format(new Date(first.bucket)) : key,
+          kwh,
+          cents,
+          solarKwh: solarWh === null ? null : solarWh / 1000,
+          points: pts,
+        };
+      });
+  }, [monthPts]);
+  const maxDayCents = Math.max(1, ...days.map((d) => d.cents));
+  const selDay = selectedDay ? (days.find((d) => d.key === selectedDay) ?? null) : null;
+  /** 24 hourly kWh slots for the selected day, keyed by Melbourne hour. */
+  const selHours = useMemo<Array<number> | null>(() => {
+    if (!selDay) return null;
+    const hours = new Array<number>(24).fill(0);
+    for (const p of selDay.points) hours[melbourneHour(new Date(p.bucket))] += p.consumed_kwh;
+    return hours;
+  }, [selDay]);
+  const selHourMax = selHours ? Math.max(0.0001, ...selHours) : 1;
   /** Day's peak draw — the dial scale pins to this so the longest bar reaches the ring. */
   const dayMax = useMemo(
     () => Math.max(1000, ...petals.map((p) => p.avg_grid_watts ?? 0)),
@@ -466,24 +535,65 @@ export function LiveView() {
         </section>
         <section className="card live-card">
           <div className="card-head">
-            <h2>Monthly est.</h2>
-            <span className="muted">{months.length === 1 ? "partial month" : "calendar months"}</span>
+            <h2>This month</h2>
+            <span className="muted">daily ToU cost · tap a bar</span>
           </div>
-          <div className="month-bars">
-            {months.map((m) => (
-              <div className="month-col" key={m.key}>
-                <span className="month-val">{formatDollars(m.cents)}</span>
-                <div className="month-bar">
-                  <div
-                    className="month-bar-fill"
-                    style={{ height: `${Math.max(4, (m.cents / maxMonthCents) * 100)}%` }}
-                  />
-                </div>
-                <span className="month-label">{m.label}</span>
+          {days.length === 0 ? (
+            <div className="day-empty">no complete days yet this month</div>
+          ) : (
+            <div className="day-bars">
+              {days.map((d) => (
+                <button
+                  key={d.key}
+                  type="button"
+                  className={"day-col" + (d.key === selectedDay ? " sel" : "")}
+                  aria-pressed={d.key === selectedDay}
+                  title={`${d.label} · ${formatKwh(d.kwh)} · ${formatDollars(d.cents)}`}
+                  onClick={() => setSelectedDay((cur) => (cur === d.key ? null : d.key))}
+                >
+                  <span className="day-bar">
+                    <span
+                      className="day-bar-fill"
+                      style={{ height: `${Math.max(3, (d.cents / maxDayCents) * 100)}%` }}
+                    />
+                  </span>
+                  <span className="day-num">{d.dayNum}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {selDay && selHours ? (
+            <div className="day-detail">
+              <div className="day-detail-head">
+                <strong>{selDay.label}</strong>
+                <span>{formatKwh(selDay.kwh)} used</span>
+                <span>{formatDollars(selDay.cents)} est.</span>
+                <span className="day-solar">
+                  ☀ {selDay.solarKwh === null ? "—" : formatKwh(selDay.solarKwh)} solar
+                </span>
               </div>
-            ))}
-            {months.length === 0 ? <span className="muted">no data yet</span> : null}
-          </div>
+              <div className="day-hours">
+                {selHours.map((kwh, h) => (
+                  <span
+                    key={h}
+                    className={"day-hour" + (h < 6 ? " offpeak" : "")}
+                    style={{ height: `${Math.max(4, (kwh / selHourMax) * 100)}%` }}
+                    title={`${String(h).padStart(2, "0")}:00 · ${kwh.toFixed(2)} kWh`}
+                  />
+                ))}
+              </div>
+              <div className="day-detail-cap">
+                hourly grid use · dim = off-peak 8c · bright = peak 27c · today joins when it
+                completes
+              </div>
+            </div>
+          ) : (
+            <div className="day-detail">
+              <div className="day-detail-cap">
+                {days.length === 0 ? "data begins 12 Oct 2026" : "tap a bar to see the day's numbers"}
+              </div>
+            </div>
+          )}
         </section>
       </div>
 
