@@ -5,6 +5,7 @@ import { ErrorBanner } from "./components/ErrorBanner";
 import { NowPanel } from "./components/NowPanel";
 import { OverviewChart } from "./components/OverviewChart";
 import { LiveView } from "./components/LiveView";
+import { FlowView } from "./components/FlowView";
 import { formatClock } from "./lib/format";
 
 const REFRESH_MS = 60_000;
@@ -37,7 +38,7 @@ async function allow404<T>(promise: Promise<T>): Promise<T | null> {
 }
 
 export default function App() {
-  const [view, setView] = useState<"charts" | "live">("live");
+  const [view, setView] = useState<"charts" | "flow" | "live">("live");
   const [range, setRange] = useState<RangeKey>("24h");
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [overview, setOverview] = useState<EnergyOverviewPage | null>(null);
@@ -135,6 +136,15 @@ export default function App() {
             <button
               type="button"
               role="tab"
+              aria-selected={view === "flow"}
+              className={view === "flow" ? "active" : ""}
+              onClick={() => setView("flow")}
+            >
+              Flow
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={view === "live"}
               className={view === "live" ? "active" : ""}
               onClick={() => setView("live")}
@@ -177,7 +187,9 @@ export default function App() {
         </div>
       </header>
 
-      {view === "live" ? (
+      {view === "flow" ? (
+        <FlowView />
+      ) : view === "live" ? (
         <LiveView />
       ) : (
         <>

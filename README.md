@@ -130,6 +130,16 @@ Other scripts:
 
 ---
 
+### Flow tab (added 2026-10-19)
+
+Third view — an animated one-line diagram with three icons: solar panels, the
+grid powerline and the house. Particles ride the wires in the real direction
+of current: **blue = grid import**, **green = solar** (panels → house, or
+house → grid on net export). Particle speed, count and wire thickness track
+live watts; house windows glow green when solar is covering the load. Stat
+tiles + status sentence update every 10 s; today kWh / $ / solar chips every
+60 s. Selectable tab — **Live stays the default**.
+
 ## Deployment (wrangler CLI — deployed 2026-10-17)
 
 > The old dashboard click-path (Workers & Pages → Connect to Git) died in the

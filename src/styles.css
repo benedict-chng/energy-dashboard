@@ -524,3 +524,101 @@ button.ghost.on {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------ Flow view ------------------------------ */
+
+.flow-stats {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 2px 0 4px;
+}
+
+.flow-stat {
+  flex: 1 1 150px;
+  max-width: 210px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.flow-stat .k {
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.flow-stat .v {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.flow-stat .s {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.flow-stat.t-house .v {
+  color: #e8edf2;
+}
+
+.flow-stat.t-solar .v {
+  color: #4ade80;
+}
+
+.flow-stat.t-grid .v {
+  color: #4f8cff;
+}
+
+.flow-stage {
+  margin-top: 4px;
+}
+
+.flow-stage svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.flow-pad {
+  fill: rgba(13, 18, 26, 0.55);
+  stroke: rgba(255, 255, 255, 0.08);
+}
+
+.flow-status {
+  text-align: center;
+  font-size: 14px;
+  color: #c8d2dc;
+  margin: 2px 0 10px;
+}
+
+.flow-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.flow-foot .dial-solar {
+  color: #4ade80;
+}
+
+.flow-foot .dial-age.stale {
+  color: #d9534a;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-particles {
+    display: none;
+  }
+}
