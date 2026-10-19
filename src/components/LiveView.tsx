@@ -8,12 +8,11 @@
  * the needle marks "now").
  * Each 15-minute bar radiates from 0.4r to 0.85r with squared ends, its
  * length being the grid power used in that slot; hovering a bar shows its
- * time range, watts, kWh, ToU cost and solar. Solar generation overlays the
- * dial in one of five selectable styles (persisted per browser): gold rays
- * in the bar annulus, a translucent fan under the solar curve, a fixed-radius
- * arc, the original thin gold line, or hidden. The centre shows the current
- * watts only. Amber ring arc = peak tariff (6am–midnight), blue arc =
- * off-peak (midnight–6am).
+ * time range, watts, kWh, ToU cost and solar. Grid bars are blue; solar
+ * generation overlays the same annulus as green rays (length ∝ solar watts,
+ * drawn underneath the bars). The centre shows the current watts only.
+ * Amber ring arc = peak tariff (6am–midnight), blue arc = off-peak
+ * (midnight–6am).
  *
  * Polling (while this tab is mounted): latest readings every 10 s, dial
  * history + cost strips every 60 s. The Charts view keeps its own pipeline.
@@ -38,27 +37,9 @@ const STALE_MS = 10 * 60_000;
 const ZONE_COLORS = { low: "#7fbb63", mid: "#e8a33d", high: "#d9534a" } as const;
 type Zone = keyof typeof ZONE_COLORS;
 
-/** How solar generation is drawn on the live dial. */
-type SolarStyle = "rays" | "fan" | "arc" | "line" | "off";
-
-const SOLAR_STYLES: ReadonlyArray<{ id: SolarStyle; label: string }> = [
-  { id: "rays", label: "Rays" },
-  { id: "fan", label: "Fan" },
-  { id: "arc", label: "Arc" },
-  { id: "line", label: "Line" },
-  { id: "off", label: "Off" },
-];
-
-const SOLAR_STYLE_KEY = "live-dial-solar-style";
-
-function loadSolarStyle(): SolarStyle {
-  try {
-    const v = window.localStorage.getItem(SOLAR_STYLE_KEY);
-    return SOLAR_STYLES.some((s) => s.id === v) ? (v as SolarStyle) : "rays";
-  } catch {
-    return "rays";
-  }
-}
+/** Live-dial palette: grid bars blue, solar rays green (Ben's pick). */
+const GRID_BLUE = "#4f8cff";
+const SOLAR_GREEN = "#4ade80";
 
 function zoneForWatts(w: number | null): Zone {
   if (w === null || w < 500) return "low";
@@ -161,9 +142,8 @@ function UsageDial(props: {
   sixAmMs: number;
   nowMs: number;
   dayMax: number;
-  solarStyle: SolarStyle;
 }) {
-  const { watts, petals, sixAmMs, nowMs, dayMax, solarStyle } = props;
+  const { watts, petals, sixAmMs, nowMs, dayMax } = props;
   const zone = zoneForWatts(watts);
   const colour = ZONE_COLORS[zone];
   const [hover, setHover] = useState<HoverSlot | null>(null);
@@ -191,7 +171,7 @@ function UsageDial(props: {
         <text x={bx + 10} y={by + 55} fontSize={12} fill="#c8d2dc">
           {hover.kwh.toFixed(2)} kWh · {(hover.kwh * rateAt(start)).toFixed(1)}c
         </text>
-        <text x={bx + 10} y={by + 73} fontSize={12} fill="#e5c04b">
+        <text x={bx + 10} y={by + 73} fontSize={12} fill={SOLAR_GREEN}>
           ☀ {hover.solar === null ? "—" : formatWattsShort(hover.solar)} solar
         </text>
       </g>
@@ -243,34 +223,29 @@ function UsageDial(props: {
         {formatWattsShort(dayMax / 2)}
       </text>
 
-      {/* solar generation — selectable style; never intercepts hover (the
-          grey bars' wide invisible hit-lines own pointer events). Rays share
-          the bars' annulus and render underneath them; the fan fills from the
-          bar base out to the solar curve; the arc sits in the clear gap
-          between the hour labels and the tariff ring. */}
+      {/* solar generation: green rays in the bars' annulus, length ∝ solar
+          watts; rendered underneath the blue grid bars and never intercepting
+          hover (the bars' wide invisible hit-lines own pointer events). Where
+          a slot's green tip pokes past the blue bar, solar out-generated the
+          grid draw in that slot. */}
       {(() => {
         const solarMax = Math.max(1000, ...petals.map((p) => p.avg_solar_watts ?? 0));
-        const geo = petals
-          .filter((p) => p.avg_solar_watts !== null)
-          .map((p) => ({
-            a: dayAngle(new Date(p.bucket).getTime(), sixAmMs),
-            s: Math.max(0, Math.min(p.avg_solar_watts ?? 0, solarMax)),
-          }));
-        if (solarStyle === "off" || geo.length === 0) return null;
-
-        if (solarStyle === "rays") {
-          return geo.map((g, i) => {
-            if (g.s <= 0) return null;
-            const [x0, y0] = polar(BAR_R0, g.a);
-            const [x1, y1] = polar(BAR_R0 + (g.s / solarMax) * BAR_SPAN, g.a);
+        return petals
+          .map((p) => ({ p, s: p.avg_solar_watts }))
+          .filter(({ s }) => s !== null && s > 0)
+          .map(({ p, s }) => {
+            const a = dayAngle(new Date(p.bucket).getTime(), sixAmMs);
+            const len = BAR_R0 + (Math.min(s ?? 0, solarMax) / solarMax) * BAR_SPAN;
+            const [x0, y0] = polar(BAR_R0, a);
+            const [x1, y1] = polar(len, a);
             return (
               <line
-                key={i}
+                key={p.bucket}
                 x1={x0}
                 y1={y0}
                 x2={x1}
                 y2={y1}
-                stroke="#e5c04b"
+                stroke={SOLAR_GREEN}
                 strokeWidth={4}
                 strokeLinecap="butt"
                 opacity={0.95}
@@ -278,76 +253,15 @@ function UsageDial(props: {
               />
             );
           });
-        }
-
-        if (solarStyle === "fan") {
-          if (geo.length < 2) return null;
-          const outer = geo.map((g) => polar(BAR_R0 + (g.s / solarMax) * BAR_SPAN, g.a));
-          const inner = [...geo].reverse().map((g) => polar(BAR_R0, g.a));
-          const fmt = (pts: Array<[number, number]>) =>
-            pts.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(" L ");
-          return (
-            <g pointerEvents="none">
-              <path
-                d={`M ${fmt(outer)} L ${fmt(inner)} Z`}
-                fill="rgba(229,192,75,0.20)"
-                stroke="none"
-              />
-              <polyline
-                points={outer.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(" ")}
-                fill="none"
-                stroke="#e5c04b"
-                strokeWidth={2}
-                strokeLinejoin="round"
-                opacity={0.85}
-              />
-            </g>
-          );
-        }
-
-        if (solarStyle === "arc") {
-          const half = 360 / 96 / 2; // half a 15-minute slot
-          return geo.map((g, i) => {
-            if (g.s <= 0) return null;
-            return (
-              <path
-                key={i}
-                d={arcPath(143, g.a - half + 0.35, g.a + half - 0.35)}
-                fill="none"
-                stroke="#e5c04b"
-                strokeWidth={4}
-                strokeLinecap="butt"
-                opacity={0.3 + 0.6 * (g.s / solarMax)}
-                pointerEvents="none"
-              />
-            );
-          });
-        }
-
-        // "line" — the original thin gold trace (radius from centre ∝ solar watts)
-        if (geo.length < 2) return null;
-        const pts = geo.map((g) => polar(8 + (g.s / solarMax) * 132, g.a));
-        return (
-          <polyline
-            points={pts.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(" ")}
-            fill="none"
-            stroke="#e5c04b"
-            strokeWidth={2.5}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            opacity={0.9}
-            pointerEvents="none"
-          />
-        );
       })()}
 
       {/* backdrop fade BEHIND the bars — bars render at full opacity on top of it */}
       <circle cx={C} cy={C} r={50} fill="url(#centreFade)" pointerEvents="none" />
 
-      {/* usage bars: circumference = time since 6am; each bar starts at 0.5r and its
+      {/* usage bars: circumference = time since 6am; each bar starts at 0.4r and its
           length is proportional to the watts in that 15-min slot (linear, day-peak
-          normalized). Light grey like the Powerpal original; wide invisible hit-lines
-          make hovering easy; zero-draw slots collapse to a nub at the bar base. */}
+          normalized). Blue = grid draw; wide invisible hit-lines make hovering
+          easy; zero-draw slots collapse to a nub at the bar base. */}
       {petals.map((p) => {
         if (p.avg_grid_watts === null || p.avg_grid_watts < 0) return null;
         const ms = new Date(p.bucket).getTime();
@@ -372,7 +286,7 @@ function UsageDial(props: {
               y1={y0}
               x2={x1}
               y2={y1}
-              stroke={hovered ? "#ffffff" : "#c8cfd8"}
+              stroke={hovered ? "#ffffff" : GRID_BLUE}
               strokeWidth={hovered ? 7 : 6}
               strokeLinecap="butt"
             />
@@ -413,18 +327,9 @@ export function LiveView() {
   const [todayPts, setTodayPts] = useState<EnergyOverviewPoint[]>([]);
   const [monthPts, setMonthPts] = useState<EnergyOverviewPoint[]>([]);
   const [sixAmMs, setSixAmMs] = useState<number>(() => recentSixAm(new Date()).getTime());
-  const [solarStyle, setSolarStyle] = useState<SolarStyle>(loadSolarStyle);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(SOLAR_STYLE_KEY, solarStyle);
-    } catch {
-      /* storage unavailable (private mode etc.) — style just won't persist */
-    }
-  }, [solarStyle]);
 
   const fetchFast = useCallback(async () => {
     const [g, s] = await Promise.allSettled([
@@ -520,20 +425,7 @@ export function LiveView() {
         <div className="card-head">
           <h2>Live — today so far</h2>
           <div className="dial-actions">
-            <span className="muted">solar:</span>
-            <div className="seg" role="group" aria-label="Solar display style on the dial">
-              {SOLAR_STYLES.map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className={solarStyle === s.id ? "on" : ""}
-                  aria-pressed={solarStyle === s.id}
-                  onClick={() => setSolarStyle(s.id)}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            <span className="muted">blue = grid · green = solar · hover for numbers</span>
             <button type="button" className="ghost" onClick={refetchAll}>
               ↻ Refresh
             </button>
@@ -546,7 +438,6 @@ export function LiveView() {
             sixAmMs={sixAmMs}
             nowMs={Date.now()}
             dayMax={dayMax}
-            solarStyle={solarStyle}
           />
         </div>
         <div className="dial-meta">
@@ -597,8 +488,8 @@ export function LiveView() {
       </div>
 
       <div className="tariff-note">
-        Bars: light grey, length ∝ power (normalised to today's peak); hover a
-        bar for time, watts, kWh, cost and solar. ToU tariff
+        Bars: blue, length ∝ grid power (normalised to today's peak); green rays
+        underneath = solar; hover a bar for time, watts, kWh, cost and solar. ToU tariff
         estimates: 8 c/kWh 00:00–06:00 · 27 c/kWh 06:00–24:00 (Melbourne time) ·
         covers grid import only — solar self-consumption is free · supply charge &amp; network
         fees not included · the first recorded month is partial.
