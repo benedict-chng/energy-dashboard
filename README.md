@@ -105,16 +105,18 @@ Other scripts:
   grey at full opacity, its length linear-proportional to the grid watts used in
   that slot (normalised to the day's peak; dashed circle = half-peak, labelled with
   its actual W). **Hover a bar** for its time range, watts, kWh, ToU cost and solar.
-  A thin **gold line** traces solar generation radiating from the centre — its
-  distance from the middle is proportional to the solar watts, peaking near the
-  ring at the day's solar max. Ring arcs follow the tariff: amber = peak
-  (6am–midnight), blue = off-peak (midnight–6am). The centre shows the current
-  watts only (colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red) on a
-  small backdrop fade.
+  **Solar overlay** is a toggle in the card header (persisted per browser): **Rays**
+  (gold spokes in the bar annulus, length ∝ solar), **Fan** (translucent gold fill
+  under the solar curve), **Arc** (thin fixed-radius arc, brightness ∝ solar),
+  **Line** (the original thin gold trace), **Off**. Ring arcs follow the tariff:
+  amber = peak (6am–midnight), blue = off-peak (midnight–6am). The centre shows the
+  current watts only (colour-coded < 500 W green / 500–3000 W amber / ≥ 3000 W red)
+  on a small backdrop fade.
 - **Freshness** — the Pi ingests once per minute; latest readings poll every 10 s,
   history + cost strips every 60 s. The "grid reading" chip shows data age and turns
   red after 10 min of ingest silence.
-- **Solar** — gold chip below the dial + the gold line on the dial itself: the meter
+- **Solar** — gold chip below the dial + the selectable overlay (see above; default
+  **Rays**, your pick persists in the browser). The meter
   reads net grid import, so with solar covering the house the grid bars sit at 0 W —
   that energy is just free.
 - **Costs** — time-of-use tariff from `src/lib/tariff.ts`:
